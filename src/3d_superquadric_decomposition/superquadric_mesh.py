@@ -17,6 +17,7 @@ def superquadric_mesh(superquadric: SuperQuadricParams):
     f_points = superquadric_point(superquadric=superquadric,n_eta=n_eta,n_omega=n_omega)
     # triangulate the grid of points
     faces = triangulate_grid(n_eta,n_omega)
+    #faces = grid_faces_numba(n_eta,n_omega)
     # apply the rotation and translation to the points
     f_points = apply_pose(f_points,superquadric)
     # create a mesh from the points and faces
@@ -53,19 +54,21 @@ def superquadric_point (superquadric: SuperQuadricParams,n_eta: int,n_omega: int
 
 
 def triangulate_grid(n_eta,n_omega):
-    # because my verticis (f_points) are in a list 1D
+    # my verticis (f_points) are in a list 1D
     def vid(i, j): return i*n_omega + j
     faces = []
     for i in range(n_eta - 1):
         for j in range(n_omega):
+            # to connect the last point to the first one in the same row, we use j2 = (j + 1) % n_omega
             j2 = (j + 1) % n_omega
-            v00 = vid(i,   j)
-            v01 = vid(i,   j2)
-            v10 = vid(i+1, j)
-            v11 = vid(i+1, j2)
+            # square cutted in half -> 2 triangles
+            v00 = vid(i,j)
+            v01 = vid(i,j2)
+            v10 = vid(i+1,j)
+            v11 = vid(i+1,j2)
             faces.append([v00, v10, v11])
             faces.append([v00, v11, v01])
-    return np.array(faces, dtype=np.int64)
+    return np.array(faces)
 
 
 def apply_pose(points, superquadric:SuperQuadricParams):
@@ -74,3 +77,46 @@ def apply_pose(points, superquadric:SuperQuadricParams):
     R = np.asarray(R, float)
     t = np.asarray(t, float).reshape(3,)
     return (R @ points.T).T + t[None, :]
+
+
+
+#------------------------------------------
+from numba import njit
+# from the second call, numba compile the code
+@njit(cache=True)
+def grid_faces_numba(n_eta: int, n_omega: int):
+    """
+    Ritorna un array (T, 3) int64 con i triangoli.
+    T = 2 * (n_eta - 1) * n_omega
+    """
+    n_tris = 2 * (n_eta - 1) * n_omega
+    F = np.empty((n_tris, 3), dtype=np.int64)
+
+    k = 0
+    for i in range(n_eta - 1):
+        row0 = i * n_omega
+        row1 = (i + 1) * n_omega
+        for j in range(n_omega):
+            j2 = j + 1
+            if j2 == n_omega:
+                j2 = 0  # wrap-around (equivalente a (j+1) % n_omega)
+
+            v00 = row0 + j
+            v01 = row0 + j2
+            v10 = row1 + j
+            v11 = row1 + j2
+
+            # triangolo 1
+            F[k, 0] = v00
+            F[k, 1] = v10
+            F[k, 2] = v11
+            k += 1
+
+            # triangolo 2
+            F[k, 0] = v00
+            F[k, 1] = v11
+            F[k, 2] = v01
+            k += 1
+
+    return F
+

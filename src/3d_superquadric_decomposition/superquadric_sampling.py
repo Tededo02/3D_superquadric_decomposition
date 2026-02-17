@@ -1,0 +1,111 @@
+import numpy as np
+from trimesh import Trimesh
+import trimesh
+
+
+# sample points on the surface of the superquadric meshes
+# uniformly in area. each mesh in the list is sampled with n_points points
+# the result is a list of arrays of points
+def sampling_sq(mesh_list: list[Trimesh], n_points: int = 1000) -> list[np.ndarray]:
+    points_list: list[np.ndarray] = []
+    for mesh in mesh_list:
+        pts, _ = trimesh.sample.sample_surface(mesh, n_points) # pts are type numpy array of shape (n_points,3) and coordinates are type float32
+        points_list.append(pts)
+    return points_list
+
+def sampling_sq_random(mesh_list: list[Trimesh], n_points: int = 1000, seed: int | None = None) -> list[np.ndarray]:
+    points_list: list[np.ndarray] = []
+    for mesh in mesh_list:
+        pts, _ = trimesh.sample.sample_surface(mesh, n_points, seed=seed) # pts are type numpy array of shape (n_points,3) and coordinates are type float32
+        points_list.append(pts)
+    return points_list
+
+# sample points on the surface of the superquadric meshes with noise along the normal direction. 
+def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: float = 0.01,clip_k: float | None = 3.0,seed: int | None = None,) -> list[np.ndarray]:
+    rng = np.random.default_rng(seed)
+    points_list: list[np.ndarray] = []
+
+    for mesh in mesh_list:
+        # sample points on surface + get which face each point came from
+        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points)  # pts: (N,3), face_idx: (N,)
+        pts = pts.astype(np.float32, copy=False)
+        # get the corresponding face normals (one normal per sampled point)
+        normals = mesh.face_normals[face_idx].astype(np.float32, copy=False)  # (N,3), already unit-length
+        # daw 1D Gaussian noise amplitudes (one scalar per point)
+        alpha = rng.normal(loc=0.0, scale=noise_std, size=(n_points, 1)).astype(np.float32)  # (N,1)
+        # clip to avoid rare large jumps
+        if clip_k is not None:
+            alpha = np.clip(alpha, -clip_k * noise_std, clip_k * noise_std)
+        # move each point only along its normal
+        pts_noisy = pts + normals * alpha  # (N,3)
+
+        points_list.append(pts_noisy)
+
+    return points_list
+
+
+
+#Returns outliers sampled inside the global bounding box of the input meshes.
+#The sampling distribution is independent from the mesh geometry (only bbox is used).
+def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: float = 0.10,
+    mode: str = "uniform",  # "uniform" | "beta" | "mog"
+    beta_ab: tuple[float, float] = (2.0, 2.0),
+    n_clusters: int = 5,
+    cluster_std_frac: float = 0.05,
+    seed: int | None = None,
+) -> np.ndarray:
+    if n_out <= 0:
+        return np.empty((0, 3), dtype=np.float64)
+
+    rng = np.random.default_rng(seed)
+
+    mins = np.min([m.bounds[0] for m in meshes], axis=0).astype(np.float64)
+    maxs = np.max([m.bounds[1] for m in meshes], axis=0).astype(np.float64)
+
+    diag = np.linalg.norm(maxs - mins)
+    pad = margin * diag
+    low = mins - pad
+    high = maxs + pad
+    size = high - low
+
+    if np.any(size <= 0):
+        raise ValueError("Degenerate bounding box (some axis has non-positive size).")
+
+    mode = mode.lower()
+
+    if mode == "uniform":
+        pts = rng.uniform(low=low, high=high, size=(n_out, 3))
+        return pts.astype(np.float32)
+
+    if mode == "beta":
+        a, b = beta_ab
+        if a <= 0 or b <= 0:
+            raise ValueError("beta_ab must be positive.")
+        u = rng.beta(a, b, size=(n_out, 3))  # in [0,1]
+        pts = low + u * size
+        return pts.astype(np.float32)
+
+    if mode == "mog":
+        if n_clusters <= 0:
+            raise ValueError("n_clusters must be >= 1.")
+        if cluster_std_frac <= 0:
+            raise ValueError("cluster_std_frac must be > 0.")
+
+        centers_u = rng.uniform(0.0, 1.0, size=(n_clusters, 3))
+        centers = low + centers_u * size
+
+        std = cluster_std_frac * diag
+        if std <= 0:
+            std = 1e-6
+
+        idx = rng.integers(0, n_clusters, size=(n_out,))
+        pts = centers[idx] + rng.normal(0.0, std, size=(n_out, 3))
+
+        # clip to bbox so points always stay inside
+        pts = np.clip(pts, low, high)
+        return pts.astype(np.float32)
+
+    raise ValueError(f"Unknown mode '{mode}'. Use: 'uniform', 'beta', 'mog'.")
+
+
+

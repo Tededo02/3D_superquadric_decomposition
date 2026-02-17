@@ -1,28 +1,40 @@
 import pyvista as pv
 import numpy as np
 
-def show_mesh_and_points(mesh, pts=None, point_size=6, show_bounds=True):
-    # --- trimesh -> pyvista PolyData ---
-    faces = np.hstack([
-        np.full((len(mesh.faces), 1), 3, dtype=np.int64),
-        mesh.faces.astype(np.int64)
-    ]).ravel()  # VTK spesso gradisce 1D
-    poly = pv.PolyData(mesh.vertices, faces)
+def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bounds=True):
 
     # --- plotter ---
     pl = pv.Plotter()
     pl.set_background("white")  # sfondo chiaro
 
-    # Mesh
-    pl.add_mesh(poly, smooth_shading=True, opacity=0.65)
 
-    # Punti (se presenti)
+    # --- aggiungi tutte le mesh ---
+    all_vertices = []
+    total_faces = 0
+
+    for mesh in meshes:
+        faces = np.hstack([
+            np.full((len(mesh.faces), 1), 3, dtype=np.int64),
+            mesh.faces.astype(np.int64)
+        ]).ravel()  # VTK gradisce 1D: [3,i,j,k, 3,i,j,k, ...]
+        poly = pv.PolyData(mesh.vertices, faces)
+
+        pl.add_mesh(poly, smooth_shading=True, opacity=0.65)
+
+        all_vertices.append(np.asarray(mesh.vertices))
+        total_faces += len(mesh.faces)
+
+    # --- punti (se presenti) ---
+    n_points_total = 0
     if pts is not None:
+        points = np.asarray(pts, dtype=np.float32).reshape(-1, 3) # -1 because numpy can infer the number of points, 3 for XYZ
+        n_points_total = points.shape[0] # total number of points across all meshes
         pl.add_points(
-            np.asarray(pts),
+            points,
             render_points_as_spheres=True,
             point_size=point_size
         )
+
 
     # Assi + griglia “in scena”
     pl.show_axes()            # triade assi in basso (widget)
@@ -41,24 +53,29 @@ def show_mesh_and_points(mesh, pts=None, point_size=6, show_bounds=True):
             location="outer",
             all_edges=True,
             ticks="outside",
-            xlabel="X", ylabel="Y", zlabel="Z",
+            xtitle="X", ytitle="Y", ztitle="Z",
             font_size=10
         )
 
-    # Testo con “qualche valore”
-    v = np.asarray(mesh.vertices)
-    vmin = v.min(axis=0)
-    vmax = v.max(axis=0)
 
-    info = [
-        f"Vertices: {len(mesh.vertices)}",
-        f"Faces: {len(mesh.faces)}",
-        f"X range: [{vmin[0]:.3f}, {vmax[0]:.3f}]",
-        f"Y range: [{vmin[1]:.3f}, {vmax[1]:.3f}]",
-        f"Z range: [{vmin[2]:.3f}, {vmax[2]:.3f}]",
-    ]
+    # --- testo info (range su tutte le mesh) ---
+    v = np.vstack(all_vertices) if len(all_vertices) else np.zeros((0, 3))
+    if v.shape[0] > 0:
+        vmin = v.min(axis=0)
+        vmax = v.max(axis=0)
+        info = [
+            f"Meshes: {len(meshes)}",
+            f"Vertices (tot): {v.shape[0]}",
+            f"Faces (tot): {total_faces}",
+            f"X range: [{vmin[0]:.3f}, {vmax[0]:.3f}]",
+            f"Y range: [{vmin[1]:.3f}, {vmax[1]:.3f}]",
+            f"Z range: [{vmin[2]:.3f}, {vmax[2]:.3f}]",
+        ]
+    else:
+        info = [f"Meshes: {len(meshes)}"]
+
     if pts is not None:
-        info.append(f"Sample points: {len(pts)}")
+        info.append(f"Sample points: {n_points_total}")
 
     pl.add_text("\n".join(info), position="upper_left", font_size=10)
 
