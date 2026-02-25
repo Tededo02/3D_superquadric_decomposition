@@ -16,8 +16,8 @@ def superquadric_mesh(superquadric: SuperQuadricParams):
     # compute the points on the superquadric surface
     f_points = superquadric_point(superquadric=superquadric,n_eta=n_eta,n_omega=n_omega)
     # triangulate the grid of points
-    faces = triangulate_grid(n_eta,n_omega)
-    #faces = grid_faces_numba(n_eta,n_omega)
+    #faces = triangulate_grid(n_eta,n_omega)
+    faces = grid_faces_numba(n_eta,n_omega)
     # apply the rotation and translation to the points
     f_points = apply_pose(f_points,superquadric)
     # create a mesh from the points and faces

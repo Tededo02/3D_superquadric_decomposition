@@ -48,41 +48,28 @@ def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: f
 #Returns outliers sampled inside the global bounding box of the input meshes.
 #The sampling distribution is independent from the mesh geometry (only bbox is used).
 def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: float = 0.10,
-    mode: str = "uniform",  # "uniform" | "beta" | "mog"
-    beta_ab: tuple[float, float] = (2.0, 2.0),
+    mode: str = "uniform",  # "uniform" , "mog"
     n_clusters: int = 5,
-    cluster_std_frac: float = 0.05,
+    cluster_std_frac: float = 0.1,
     seed: int | None = None,
 ) -> np.ndarray:
     if n_out <= 0:
-        return np.empty((0, 3), dtype=np.float64)
+        return np.empty((0, 3), dtype=np.float32)
 
     rng = np.random.default_rng(seed)
 
-    mins = np.min([m.bounds[0] for m in meshes], axis=0).astype(np.float64)
-    maxs = np.max([m.bounds[1] for m in meshes], axis=0).astype(np.float64)
+    mins = np.min([m.bounds[0] for m in meshes], axis=0).astype(np.float32)
+    maxs = np.max([m.bounds[1] for m in meshes], axis=0).astype(np.float32)
 
     diag = np.linalg.norm(maxs - mins)
     pad = margin * diag
     low = mins - pad
     high = maxs + pad
     size = high - low
-
-    if np.any(size <= 0):
-        raise ValueError("Degenerate bounding box (some axis has non-positive size).")
-
     mode = mode.lower()
 
     if mode == "uniform":
         pts = rng.uniform(low=low, high=high, size=(n_out, 3))
-        return pts.astype(np.float32)
-
-    if mode == "beta":
-        a, b = beta_ab
-        if a <= 0 or b <= 0:
-            raise ValueError("beta_ab must be positive.")
-        u = rng.beta(a, b, size=(n_out, 3))  # in [0,1]
-        pts = low + u * size
         return pts.astype(np.float32)
 
     if mode == "mog":
@@ -105,7 +92,7 @@ def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: flo
         pts = np.clip(pts, low, high)
         return pts.astype(np.float32)
 
-    raise ValueError(f"Unknown mode '{mode}'. Use: 'uniform', 'beta', 'mog'.")
+    raise ValueError(f"Unknown mode '{mode}'. Use: 'uniform', 'mog'.")
 
 
 

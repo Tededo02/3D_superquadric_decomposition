@@ -1,7 +1,7 @@
 import pyvista as pv
 import numpy as np
 
-def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bounds=True):
+def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bounds=True,colors: np.ndarray = None):
 
     # --- plotter ---
     pl = pv.Plotter()
@@ -11,18 +11,19 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bound
     # --- aggiungi tutte le mesh ---
     all_vertices = []
     total_faces = 0
-
+    i:int=0
     for mesh in meshes:
         faces = np.hstack([
             np.full((len(mesh.faces), 1), 3, dtype=np.int64),
             mesh.faces.astype(np.int64)
         ]).ravel()  # VTK gradisce 1D: [3,i,j,k, 3,i,j,k, ...]
         poly = pv.PolyData(mesh.vertices, faces)
-
-        pl.add_mesh(poly, smooth_shading=True, opacity=0.65)
+        #lightblue
+        pl.add_mesh(poly, smooth_shading=True, opacity=0.65,color=colors[i])
 
         all_vertices.append(np.asarray(mesh.vertices))
         total_faces += len(mesh.faces)
+        i+=1
 
     # --- punti (se presenti) ---
     n_points_total = 0
