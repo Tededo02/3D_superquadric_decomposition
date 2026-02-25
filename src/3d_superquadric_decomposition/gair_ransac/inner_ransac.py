@@ -46,7 +46,7 @@ def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
     else:
         rx = np.arctan2(R[2, 1], R[2, 2])
         rz = np.arctan2(R[1, 0], R[0, 0])
-    rot = (rx, ry, rz)
+    rot = (rz, ry, rx)
     # use the mean to estimate the translation of the superquadric
     t = mean
     return SuperQuadricParams(a1=a1, a2=a2, a3=a3, e1=1.0, e2=1.0, rot=np.array(rot), t=np.array(t))
@@ -57,7 +57,7 @@ def implicit_f_superquadric_residual(model: SuperQuadricParams, points: np.ndarr
     a1, a2, a3, e1, e2, rx, ry, rz, px, py, pz = model.a1, model.a2, model.a3, model.e1, model.e2, model.rot[0], model.rot[1], model.rot[2], model.t[0], model.t[1], model.t[2]
     # apply inverse rotation and translation to points to bring them to the canonical frame of the superquadric
     R = model.rotation_matrix()
-    points_canonical = (points - np.array([px, py, pz])) @ R.T
+    points_canonical = (points - np.array([px, py, pz])) @ R
     x = points_canonical[:, 0]
     y = points_canonical[:, 1]
     z = points_canonical[:, 2]
@@ -70,7 +70,7 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
     if points.shape[0]<10:
         raise ValueError ("too few points for a stable superqadric fit")
     theta0: SuperQuadricParams
-    theta0 = pca_initialization()
+    theta0 = pca_initialization(points)
     # bounds for stability
     mins = points.min(axis=0)
     maxs = points.max(axis=0)
@@ -84,7 +84,18 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
     upper = np.array([a_max, a_max, a_max, e_max, e_max,ang_max, ang_max, ang_max,maxs[0] + t_margin, maxs[1] + t_margin, maxs[2] + t_margin], dtype=np.float64)
     theta0p= np.array([theta0.a1, theta0.a2, theta0.a3, theta0.e1, theta0.e2, theta0.rot[0], theta0.rot[1], theta0.rot[2], theta0.t[0], theta0.t[1], theta0.t[2]], dtype=np.float64)
     res = least_squares(
-        fun=implicit_f_superquadric_residual(theta0, points),
+        fun=lambda x, pts: implicit_f_superquadric_residual(
+            SuperQuadricParams(
+                a1=x[0],
+                a2=x[1],
+                a3=x[2],
+                e1=x[3],
+                e2=x[4],
+                rot=np.array([x[5], x[6], x[7]], dtype=np.float64),
+                t=np.array([x[8], x[9], x[10]], dtype=np.float64),
+            ),
+            pts,
+        ),
         x0=theta0p,
         args=(points,),
         method="trf",
@@ -106,7 +117,7 @@ def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actu
                  ) -> InnerRansacResult:
     points:np.ndarray
     n_iters: int = 50
-    sample_size:int = 30
+    sample_size:int = 40
     result: InnerRansacResult
     rng = np.random.default_rng()
     model: SuperQuadricParams
@@ -123,8 +134,8 @@ def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actu
             model = fit_superquadric_ls(points)
         except Exception:
             continue
-        inlier_set_index = compute_consensus(model,threshold)
-        count = int(np.size(inlier_set_index))
+        inlier_set_index = compute_consensus(model, point_cloud[actual_set_index], threshold)
+        count = int(np.count_nonzero(inlier_set_index))
         if count > best_count:
             best_count = count
             best_model = model
