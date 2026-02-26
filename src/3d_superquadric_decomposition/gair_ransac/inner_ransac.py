@@ -4,6 +4,7 @@ import numpy as np
 from superquadric_param import SuperQuadricParams
 from scipy.optimize import least_squares
 from .consensus import compute_consensus
+from .superquadric_residual import implicit_f_superquadric_residual, superquadric_first_order_residual  
 
 
 @dataclass
@@ -11,7 +12,7 @@ class InnerRansacResult:
     best_model: SuperQuadricParams
     best_inlier_count: int
 
-
+# initialize a superquadric model from a sample of points using PCA and quantiles
 def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
     # compute the mean and covariance of the points
     mean = np.mean(points, axis=0)
@@ -50,19 +51,6 @@ def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
     # use the mean to estimate the translation of the superquadric
     t = mean
     return SuperQuadricParams(a1=a1, a2=a2, a3=a3, e1=1.0, e2=1.0, rot=np.array(rot), t=np.array(t))
-# compute the implicit function value for each point
-# return an array of shape (N,) with the distance from each point to the superquadric surface
-# the distance is computed as the absolute value of the implicit function value, which is zero on the surface and positive outside, negative inside
-def implicit_f_superquadric_residual(model: SuperQuadricParams, points: np.ndarray) -> np.ndarray:
-    a1, a2, a3, e1, e2, rx, ry, rz, px, py, pz = model.a1, model.a2, model.a3, model.e1, model.e2, model.rot[0], model.rot[1], model.rot[2], model.t[0], model.t[1], model.t[2]
-    # apply inverse rotation and translation to points to bring them to the canonical frame of the superquadric
-    R = model.rotation_matrix()
-    points_canonical = (points - np.array([px, py, pz])) @ R
-    x = points_canonical[:, 0]
-    y = points_canonical[:, 1]
-    z = points_canonical[:, 2]
-    f = ((np.abs(x / a1) ** (2 / e2) + np.abs(y / a2) ** (2 / e2)) ** (e2 / e1) + np.abs(z / a3) ** (2 / e1)) - 1.0
-    return f
 
 # fit superquadric to points using non linear least squares with loss soft_l1.
 # initialization via PCA and bbox
@@ -84,7 +72,7 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
     upper = np.array([a_max, a_max, a_max, e_max, e_max,ang_max, ang_max, ang_max,maxs[0] + t_margin, maxs[1] + t_margin, maxs[2] + t_margin], dtype=np.float64)
     theta0p= np.array([theta0.a1, theta0.a2, theta0.a3, theta0.e1, theta0.e2, theta0.rot[0], theta0.rot[1], theta0.rot[2], theta0.t[0], theta0.t[1], theta0.t[2]], dtype=np.float64)
     res = least_squares(
-        fun=lambda x, pts: implicit_f_superquadric_residual(
+        fun=lambda x, pts: superquadric_first_order_residual(
             SuperQuadricParams(
                 a1=x[0],
                 a2=x[1],
@@ -117,12 +105,12 @@ def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actu
                  ) -> InnerRansacResult:
     points:np.ndarray
     n_iters: int = 50
-    sample_size:int = 40
+    sample_size:int = 3 # minimum number of points to fit a superquadric (11 parameters)
     result: InnerRansacResult
     rng = np.random.default_rng()
     model: SuperQuadricParams
     best_model: Optional[SuperQuadricParams] = None
-    best_inliers: np.ndarray = np.empty((0,), dtype=np.int64)
+    best_inliers: np.ndarray = np.empty((0,), dtype=bool)
     best_count: int = -1
     #sampling from gair set
     size_sample=min(np.size(refined_set_index),sample_size)
@@ -139,11 +127,24 @@ def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actu
         if count > best_count:
             best_count = count
             best_model = model
-            best_inliers = np.asarray(inlier_set_index, dtype=np.int64)
+            best_inliers = np.asarray(inlier_set_index, dtype=bool)
 
     # after loop: build result
     if best_count < 0 or best_model is None:
         return InnerRansacResult(best_model=SuperQuadricParams(1,1,1,1,1,[0,0,0],[0,0,0]),best_inlier_count=0)
+    # final refit using all inliers for better accuracy
+    actual_points = point_cloud[actual_set_index]
+    inlier_points = actual_points[best_inliers]
+    if inlier_points.shape[0] >= 10:
+        try:
+            refit_model = fit_superquadric_ls(inlier_points)
+            refit_inlier_set_index = compute_consensus(refit_model, actual_points, threshold)
+            refit_count = int(np.count_nonzero(refit_inlier_set_index))
+            if refit_count >= best_count:
+                best_model = refit_model
+                best_count = refit_count
+        except Exception:
+            pass
     result = InnerRansacResult(best_model=best_model,best_inlier_count=best_count)
     return result
 

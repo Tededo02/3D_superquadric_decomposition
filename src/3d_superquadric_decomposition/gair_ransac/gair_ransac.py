@@ -2,6 +2,11 @@ import numpy as np
 from superquadric_param import SuperQuadricParams
 from scipy.sparse import csr
 
+
+#
+#file finale da implementare contenente gair-ransac,scritto come se fosse pseudocodice
+#(commento da eliminare)
+#
 # GAIR-RANSAC algorithm to fit multiple superquadrics to a point cloud.
 """
 Args:

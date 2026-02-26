@@ -1,0 +1,62 @@
+import numpy as np
+from superquadric_param import SuperQuadricParams
+
+# compute the implicit function value for each point
+# return an array of shape (N,) with the distance from each point to the superquadric surface
+# the distance is computed as the absolute value of the implicit function value, which is zero on the surface and positive outside, negative inside
+def implicit_f_superquadric_residual(model: SuperQuadricParams, points: np.ndarray) -> np.ndarray:
+    R = model.rotation_matrix()
+    points_canonical = (points - model.t) @ R
+    x = points_canonical[:, 0]
+    y = points_canonical[:, 1]
+    z = points_canonical[:, 2]
+    a1, a2, a3, e1, e2 = model.a1, model.a2, model.a3, model.e1, model.e2
+    f = ((np.abs(x / a1) ** (2 / e2) + np.abs(y / a2) ** (2 / e2)) ** (e2 / e1) + np.abs(z / a3) ** (2 / e1)) - 1.0
+    return f
+
+# compute the first order residual for each point, which is the implicit function value divided by the norm of the gradient of the implicit function
+# this gives a better approximation of the distance to the surface, especially for points close to the surface, and is more stable for optimization
+def superquadric_first_order_residual(model: SuperQuadricParams, points: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    R = model.rotation_matrix()
+    pc = (points - model.t) @ R
+
+    x = pc[:, 0]
+    y = pc[:, 1]
+    z = pc[:, 2]
+
+    a1, a2, a3 = model.a1, model.a2, model.a3
+    e1, e2 = model.e1, model.e2
+    #build the function and its gradient in a way that is stable for optimization
+    # powers
+    p_xy = 2.0 / e2
+    p_z = 2.0 / e1
+    k = e2 / e1
+
+    # safe abs to avoid 0**(neg) when exponents go < 1
+    ax = np.maximum(np.abs(x / a1), eps)
+    ay = np.maximum(np.abs(y / a2), eps)
+    az = np.maximum(np.abs(z / a3), eps)
+    u = ax ** p_xy + ay ** p_xy
+    u = np.maximum(u, eps)
+
+    v = u ** k
+    w = az ** p_z
+    f = v + w - 1.0
+
+    # du/dx, du/dy
+    du_dx = p_xy * (ax ** (p_xy - 1.0)) * (np.sign(x) / a1)
+    du_dy = p_xy * (ay ** (p_xy - 1.0)) * (np.sign(y) / a2)
+
+    # dv/du
+    dv_du = k * (u ** (k - 1.0))
+
+    dfdx = dv_du * du_dx
+    dfdy = dv_du * du_dy
+
+    # dw/dz
+    dfdz = p_z * (az ** (p_z - 1.0)) * (np.sign(z) / a3)
+
+    grad_norm = np.sqrt(dfdx * dfdx + dfdy * dfdy + dfdz * dfdz)
+    grad_norm = np.maximum(grad_norm, 1e-9)
+
+    return f / grad_norm
