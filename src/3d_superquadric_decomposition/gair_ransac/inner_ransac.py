@@ -39,15 +39,17 @@ def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
     # use the eigenvectors to estimate the rotation of the superquadric
     sy = -R[2, 0]
     sy = np.clip(sy, -1.0, 1.0)
-    ry = np.arcsin(sy)
-    cy = np.cos(ry)
-    if abs(cy) < 1e-8:
-        rz = 0.0
-        rx = np.arctan2(-R[0, 1], R[1, 1])
+    pitch = np.arcsin(sy)
+    cp = np.cos(pitch)
+
+    if abs(cp) < 1e-8:
+        yaw = 0.0
+        roll = np.arctan2(-R[0, 1], R[1, 1])
     else:
-        rx = np.arctan2(R[2, 1], R[2, 2])
-        rz = np.arctan2(R[1, 0], R[0, 0])
-    rot = (rz, ry, rx)
+        roll = np.arctan2(R[2, 1], R[2, 2])
+        yaw = np.arctan2(R[1, 0], R[0, 0])
+
+    rot = (yaw, pitch, roll)  # (yaw=z, pitch=y, roll=x)
     # use the mean to estimate the translation of the superquadric
     t = mean
     return SuperQuadricParams(a1=a1, a2=a2, a3=a3, e1=1.0, e2=1.0, rot=np.array(rot), t=np.array(t))
@@ -55,7 +57,7 @@ def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
 # fit superquadric to points using non linear least squares with loss soft_l1.
 # initialization via PCA and bbox
 def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
-    if points.shape[0]<10:
+    if points.shape[0]<11:
         raise ValueError ("too few points for a stable superqadric fit")
     theta0: SuperQuadricParams
     theta0 = pca_initialization(points)
@@ -79,8 +81,8 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
                 a3=x[2],
                 e1=x[3],
                 e2=x[4],
-                rot=np.array([x[5], x[6], x[7]], dtype=np.float64),
-                t=np.array([x[8], x[9], x[10]], dtype=np.float64),
+                rot=np.array(x[5:8], dtype=np.float64),
+                t=np.array(x[8:11], dtype=np.float64),
             ),
             pts,
         ),
@@ -96,16 +98,19 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
     if not res.success:
         raise RuntimeError(f"least_squares failed: {res.message}")
 
-    a1, a2, a3, e1, e2, rx, ry, rz, px, py, pz = res.x.tolist()
-    return SuperQuadricParams(a1=a1, a2=a2, a3=a3, e1=e1, e2=e2, rot=np.array([rx, ry, rz], dtype=np.float64), t=np.array([px, py, pz], dtype=np.float64))
-
+    a1, a2, a3, e1, e2, yaw, pitch, roll, px, py, pz = res.x.tolist()
+    return SuperQuadricParams(
+        a1=a1, a2=a2, a3=a3, e1=e1, e2=e2,
+        rot=np.array([yaw, pitch, roll], dtype=np.float64),  # (yaw=z, pitch=y, roll=x)
+        t=np.array([px, py, pz], dtype=np.float64),
+    )
 
 
 def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actual_set_index: int,threshold: float 
                  ) -> InnerRansacResult:
     points:np.ndarray
     n_iters: int = 50
-    sample_size:int = 3 # minimum number of points to fit a superquadric (11 parameters)
+    sample_size:int = 11 # minimum number of points to fit a superquadric (11 parameters)
     result: InnerRansacResult
     rng = np.random.default_rng()
     model: SuperQuadricParams
