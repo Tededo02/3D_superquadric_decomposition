@@ -110,7 +110,7 @@ def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actu
                  ) -> InnerRansacResult:
     points:np.ndarray
     n_iters: int = 50
-    sample_size:int = 11 # minimum number of points to fit a superquadric (11 parameters)
+    sample_size:int = 30 # minimum number of points to fit a superquadric (11 parameters)
     result: InnerRansacResult
     rng = np.random.default_rng()
     model: SuperQuadricParams

@@ -19,18 +19,24 @@ def create_and_estimate_supq():
     colors.append("lightblue")
     #list_mesh.append(mesh2)
     #sampled_points = samp.sampling_sq(list_mesh, n_points=1000)
-    sampled_points_noisy = samp.sampling_sq_noisy(list_mesh, n_points=2000, noise_std=0.05, clip_k=3.0, seed=42)#list 
+    sampled_points_noisy = samp.sampling_sq_noisy(list_mesh, n_points=2000, noise_std=0.07, clip_k=3.0, seed=42)#list 
     sampled_points_random = samp.sampling_sq_random(list_mesh, n_points=2000, seed=42) #list 
     sampled_points_outliers = samp.sampling_outliers(list_mesh, n_out=400, margin=0.10, mode="uniform", seed=42) #array 2D (N_out, 3)
-
+    algorithm="ransac"
     #------choose here which kind of points to use for fitting
     sampled_points = np.vstack([*sampled_points_noisy]).astype(np.float32, copy=False)
-    #theta0:InnerRansacResult = inner_ransac(sampled_points, refined_set_index=np.arange(sampled_points.shape[0]), actual_set_index=np.arange(sampled_points.shape[0]), threshold=0.1)
-    #mesh_estimated = supmesh.superquadric_mesh(theta0.best_model)
 
-    small_sample = sampled_points[:30] # just for testing, should be sampled from the gair set
-    theta0 = fit_superquadric_ls(small_sample)
-    mesh_estimated = supmesh.superquadric_mesh(theta0)
+    if algorithm == "ls":
+
+        small_sample = sampled_points[:30] # just for testing, should be sampled from the gair set
+        theta0 = fit_superquadric_ls(small_sample)
+        mesh_estimated = supmesh.superquadric_mesh(theta0)
+
+    else:
+        theta0:InnerRansacResult = inner_ransac(sampled_points, refined_set_index=np.arange(sampled_points.shape[0]), actual_set_index=np.arange(sampled_points.shape[0]), threshold=0.1)
+        mesh_estimated = supmesh.superquadric_mesh(theta0.best_model)
+
+
     list_mesh.append(mesh_estimated)
     colors.append("lightgreen")
 
