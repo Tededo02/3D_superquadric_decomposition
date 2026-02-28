@@ -1,9 +1,9 @@
 import numpy as np
 from superquadric_param import SuperQuadricParams
-from .superquadric_residual import superquadric_first_order_residual
+from .superquadric_residual import *
 
 def distance_err(model: SuperQuadricParams, points: np.ndarray) -> np.ndarray:
-    d = superquadric_first_order_residual(model, points)
+    d = superquadric_radial_residual(model, points)
     return np.abs(d)
 
 

@@ -19,13 +19,13 @@ def create_and_estimate_supq():
     colors.append("lightblue")
     #list_mesh.append(mesh2)
     #sampled_points = samp.sampling_sq(list_mesh, n_points=1000)
-    sampled_points_noisy = samp.sampling_sq_noisy(list_mesh, n_points=2000, noise_std=0.07, clip_k=3.0, seed=42)#list 
+    sampled_points_noisy = samp.sampling_sq_noisy(list_mesh, n_points=2000, noise_std=0.2, clip_k=3.0, seed=42)#list 
     sampled_points_random = samp.sampling_sq_random(list_mesh, n_points=2000, seed=42) #list 
     sampled_points_outliers = samp.sampling_outliers(list_mesh, n_out=400, margin=0.10, mode="uniform", seed=42) #array 2D (N_out, 3)
     algorithm="ransac"
     #------choose here which kind of points to use for fitting
-    sampled_points = np.vstack([*sampled_points_noisy]).astype(np.float32, copy=False)
 
+    sampled_points = np.vstack([*sampled_points_noisy, sampled_points_outliers]).astype(np.float32, copy=False)
     if algorithm == "ls":
 
         small_sample = sampled_points[:30] # just for testing, should be sampled from the gair set
@@ -33,7 +33,7 @@ def create_and_estimate_supq():
         mesh_estimated = supmesh.superquadric_mesh(theta0)
 
     else:
-        theta0:InnerRansacResult = inner_ransac(sampled_points, refined_set_index=np.arange(sampled_points.shape[0]), actual_set_index=np.arange(sampled_points.shape[0]), threshold=0.1)
+        theta0:InnerRansacResult = inner_ransac(sampled_points, refined_set_index=np.arange(sampled_points.shape[0]), actual_set_index=np.arange(sampled_points.shape[0]), threshold=0.5)
         mesh_estimated = supmesh.superquadric_mesh(theta0.best_model)
 
 
@@ -50,7 +50,8 @@ def create_and_estimate_supq():
     cd=chamfer_distance(sampled_points,sample_from_supq_estimated)
     print(f"symmetric chamfer distance = {cd:.4f}")
 
-    vis.show_mesh_and_points(list_mesh, pts=sampled_points, point_size=5, show_bounds=True, colors=colors)
+    inlier_mask = theta0.best_inliers_mask if algorithm == "ransac" else None
+    vis.show_mesh_and_points(list_mesh, pts=sampled_points, point_size=5, show_bounds=True, colors=colors, inlier_mask=inlier_mask)
 
 def main(argv: list[str] | None = None) -> int:
     if argv is None:

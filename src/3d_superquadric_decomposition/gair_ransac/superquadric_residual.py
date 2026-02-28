@@ -58,5 +58,15 @@ def superquadric_first_order_residual(model: SuperQuadricParams, points: np.ndar
 
     grad_norm = np.sqrt(dfdx * dfdx + dfdy * dfdy + dfdz * dfdz)
     grad_norm = np.maximum(grad_norm, 1e-9)
-
     return f / grad_norm
+
+# computes the ray from the center of the superquadric to each point in space
+# then finds the respective point on the surface
+# then computes the length of the segment from the surface to the point
+def superquadric_radial_residual(model: SuperQuadricParams, points: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    R = model.rotation_matrix()
+    pc = (points - model.t) @ R
+    r = np.maximum(np.sqrt(pc[:, 0]**2 + pc[:, 1]**2 + pc[:, 2]**2), eps)
+    f = implicit_f_superquadric_residual(model, points)
+    r_surface = r * np.maximum(f + 1.0, eps) ** (-model.e1 / 2.0)
+    return r - r_surface

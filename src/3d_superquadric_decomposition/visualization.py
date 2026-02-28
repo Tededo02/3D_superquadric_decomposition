@@ -1,7 +1,7 @@
 import pyvista as pv
 import numpy as np
 
-def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bounds=True,colors: np.ndarray = None):
+def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bounds=True,colors: np.ndarray = None, inlier_mask: np.ndarray = None):
 
     # --- plotter ---
     pl = pv.Plotter()
@@ -30,11 +30,15 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bound
     if pts is not None:
         points = np.asarray(pts, dtype=np.float32).reshape(-1, 3) # -1 because numpy can infer the number of points, 3 for XYZ
         n_points_total = points.shape[0] # total number of points across all meshes
-        pl.add_points(
-            points,
-            render_points_as_spheres=True,
-            point_size=point_size
-        )
+        mask_is_valid = inlier_mask is not None and len(inlier_mask) == n_points_total
+        if mask_is_valid:
+            mask = np.asarray(inlier_mask, dtype=bool)
+            if mask.any():
+                pl.add_points(points[mask], render_points_as_spheres=True, point_size=point_size, color="green")
+            if (~mask).any():
+                pl.add_points(points[~mask], render_points_as_spheres=True, point_size=point_size, color="red", opacity=0.4)
+        else:
+            pl.add_points(points, render_points_as_spheres=True, point_size=point_size)
 
 
     # Assi + griglia “in scena”
