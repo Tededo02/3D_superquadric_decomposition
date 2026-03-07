@@ -1,5 +1,3 @@
-# gair_ransac.py (abbozzo, ma eseguibile con gli import corretti)
-from __future__ import annotations
 from typing import Optional
 import numpy as np
 
@@ -78,8 +76,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 # Build I_hat and I index sets
                 actual_set_index: IntArray = np.flatnonzero(current_inliers).astype(np.int64)
                 refined_set_index: IntArray = np.flatnonzero(refined_inliers).astype(np.int64)
-                # validate on the whole residual cloud, not only on current_inliers
-                all_current_index = np.arange(current_point_cloud.shape[0], dtype=np.int64)
+                # if validate on the whole residual cloud, not only on current_inliers
                 # Run inner RANSAC: sample from I_hat and evaluate over I
                 # actual_set_index is all_current_index because inner_ransac will compute consensus on the whole residual cloud, not only on the refined set. 
                 # with some test, this way is better because it allows inner_ransac to find a better model that fits more points in the residual
@@ -91,9 +88,15 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     continue
                 # The inlier mask returned by inner_ransac is defined on actual_set_index
                 # Update the current solution only if consensus improves
-                if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):
-                    current_inliers = refined_inliers
-                    current_count = refined_count
+                """if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):"""
+                # it doesn't work well. the paper for some reason doesn't use c_hat... but with c_hat it works much better.
+                # so let's use it
+                new_inliers_mask: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
+                new_inliers_mask[actual_set_index[inner_result.best_inliers_mask]] = True
+                new_count: int = int(np.count_nonzero(new_inliers_mask))
+                if new_count >= current_count + min_gain:
+                    current_inliers = new_inliers_mask
+                    current_count = new_count
                     current_model = inner_result.best_model
                 else:
                     terminate = True
