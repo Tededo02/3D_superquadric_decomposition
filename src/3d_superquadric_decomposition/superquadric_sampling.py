@@ -6,24 +6,31 @@ import trimesh
 # sample points on the surface of the superquadric meshes
 # uniformly in area. each mesh in the list is sampled with n_points points
 # the result is a list of arrays of points
-def sampling_sq(mesh_list: list[Trimesh], n_points: int = 1000) -> list[np.ndarray]:
+def sampling_sq(mesh_list: list[Trimesh], n_points: int = 1000) -> tuple[list[np.ndarray], list[np.ndarray]]:
     points_list: list[np.ndarray] = []
+    normals_list: list[np.ndarray] = []
     for mesh in mesh_list:
-        pts, _ = trimesh.sample.sample_surface(mesh, n_points) # pts are type numpy array of shape (n_points,3) and coordinates are type float32
+        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points) # pts are type numpy array of shape (n_points,3) and coordinates are type float32
+        normals = mesh.face_normals[face_idx].astype(np.float32, copy=False)
         points_list.append(pts)
-    return points_list
+        normals_list.append(normals)
+    return points_list, normals_list
 
-def sampling_sq_random(mesh_list: list[Trimesh], n_points: int = 1000, seed: int | None = None) -> list[np.ndarray]:
+def sampling_sq_random(mesh_list: list[Trimesh], n_points: int = 1000, seed: int | None = None) -> tuple[list[np.ndarray], list[np.ndarray]]:
     points_list: list[np.ndarray] = []
+    normals_list: list[np.ndarray] = []
     for mesh in mesh_list:
-        pts, _ = trimesh.sample.sample_surface(mesh, n_points, seed=seed) # pts are type numpy array of shape (n_points,3) and coordinates are type float32
+        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points, seed=seed) # pts are type numpy array of shape (n_points,3) and coordinates are type float32
+        normals = mesh.face_normals[face_idx].astype(np.float32, copy=False)
         points_list.append(pts)
-    return points_list
+        normals_list.append(normals)
+    return points_list, normals_list
 
 # sample points on the surface of the superquadric meshes with noise along the normal direction. 
-def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: float = 0.01,clip_k: float | None = 3.0,seed: int | None = None,) -> list[np.ndarray]:
+def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: float = 0.01,clip_k: float | None = 3.0,seed: int | None = None,) -> tuple[list[np.ndarray], list[np.ndarray]]:
     rng = np.random.default_rng(seed)
     points_list: list[np.ndarray] = []
+    normals_list: list[np.ndarray] = []
 
     for mesh in mesh_list:
         # sample points on surface + get which face each point came from
@@ -40,8 +47,9 @@ def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: f
         pts_noisy = pts + normals * alpha  # (N,3)
 
         points_list.append(pts_noisy)
+        normals_list.append(normals)
 
-    return points_list
+    return points_list, normals_list
 
 
 
@@ -52,7 +60,7 @@ def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: flo
     n_clusters: int = 5,
     cluster_std_frac: float = 0.1,
     seed: int | None = None,
-) -> np.ndarray:
+) ->tuple[ np.ndarray[np.ndarray], np.ndarray[np.ndarray]]:
     if n_out <= 0:
         return np.empty((0, 3), dtype=np.float32)
 
@@ -68,9 +76,13 @@ def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: flo
     size = high - low
     mode = mode.lower()
 
+    #generate n_out normals for the outliers randomly oriented in the 3D space
+    outlier_normals = rng.normal(size=(n_out, 3)).astype(np.float32)
+    outlier_normals /= np.linalg.norm(outlier_normals, axis=1, keepdims=True) + 1e-12  # normalize to unit length
+
     if mode == "uniform":
         pts = rng.uniform(low=low, high=high, size=(n_out, 3))
-        return pts.astype(np.float32)
+        return pts.astype(np.float32),outlier_normals
 
     if mode == "mog":
         if n_clusters <= 0:
@@ -90,7 +102,7 @@ def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: flo
 
         # clip to bbox so points always stay inside
         pts = np.clip(pts, low, high)
-        return pts.astype(np.float32)
+        return pts.astype(np.float32),outlier_normals
 
     raise ValueError(f"Unknown mode '{mode}'. Use: 'uniform', 'mog'.")
 

@@ -66,7 +66,6 @@ def spatial_walk_mss(
     # anchor: pick seed voxel weighted by density
     counts  = np.array([len(voxel_map[v]) for v in non_empty], dtype=float)
     seed    = non_empty[rng.choice(len(non_empty), p=counts / counts.sum())]
-    print(len(voxel_map))
     selected_indices: set[int]   = set()
     visited:          set[tuple] = set()
     frontier:         set[tuple] = {seed}

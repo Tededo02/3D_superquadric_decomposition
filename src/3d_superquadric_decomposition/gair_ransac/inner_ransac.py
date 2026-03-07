@@ -66,16 +66,16 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
     mins = points.min(axis=0)
     maxs = points.max(axis=0)
     diag = float(np.linalg.norm(maxs - mins) + 1e-12)
-    a_min = 1e-4 * diag
-    a_max = 2.0 * diag
-    e_min, e_max = 0.1,3.0
+    a_min = 1e-1 * diag
+    a_max = 1.5 * diag
+    e_min, e_max = 0.08,4.0
     ang_min, ang_max = -np.pi, np.pi
     t_margin = 0.25 * diag
     lower = np.array([a_min, a_min, a_min, e_min, e_min,ang_min, ang_min, ang_min,mins[0] - t_margin, mins[1] - t_margin, mins[2] - t_margin], dtype=np.float64)
     upper = np.array([a_max, a_max, a_max, e_max, e_max,ang_max, ang_max, ang_max,maxs[0] + t_margin, maxs[1] + t_margin, maxs[2] + t_margin], dtype=np.float64)
     theta0p= np.array([theta0.a1, theta0.a2, theta0.a3, theta0.e1, theta0.e2, theta0.rot[0], theta0.rot[1], theta0.rot[2], theta0.t[0], theta0.t[1], theta0.t[2]], dtype=np.float64)
     res = least_squares(
-        fun=lambda x, pts: superquadric_radial_residual(
+        fun=lambda x, pts: superquadric_first_order_residual(
             SuperQuadricParams(
                 a1=x[0],
                 a2=x[1],
@@ -107,8 +107,7 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
     )
 
 
-def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actual_set_index: int,threshold: float 
-                 ) -> InnerRansacResult:
+def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actual_set_index: int,threshold: float ) -> InnerRansacResult:
     points:np.ndarray
     n_iters: int = 50
     sample_size:int = 30 # minimum number of points to fit a superquadric (11 parameters)
@@ -141,7 +140,7 @@ def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actu
     # final refit using all inliers for better accuracy
     actual_points = point_cloud[actual_set_index]
     inlier_points = actual_points[best_inliers]
-    if inlier_points.shape[0] >= 10:
+    if inlier_points.shape[0] >= 11:
         try:
             refit_model = fit_superquadric_ls(inlier_points)
             refit_inlier_set_index = compute_consensus(refit_model, actual_points, threshold)
