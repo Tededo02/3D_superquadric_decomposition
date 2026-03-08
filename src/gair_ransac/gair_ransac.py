@@ -1,7 +1,7 @@
 from typing import Optional
 import numpy as np
 
-from superquadric_param import SuperQuadricParams
+from src.superquadrics.superquadric_param import SuperQuadricParams
 from .consensus import compute_consensus, expanded_removal_mask
 from .inner_ransac import inner_ransac, fit_superquadric_ls
 from .gair import gair

@@ -1,6 +1,6 @@
 import numpy as np
 import maxflow
-from superquadric_param import SuperQuadricParams
+from src.superquadrics.superquadric_param import SuperQuadricParams
 from .consensus import distance_err
 # building energy and graph cut
 

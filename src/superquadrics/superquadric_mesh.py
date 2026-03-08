@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.spatial.transform.rotation
 from dataclasses import dataclass
-from superquadric_param import SuperQuadricParams
+from .superquadric_param import SuperQuadricParams
 import trimesh
 
 # to use for not integer exp with negative base

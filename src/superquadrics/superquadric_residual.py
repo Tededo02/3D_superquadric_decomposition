@@ -1,5 +1,5 @@
 import numpy as np
-from superquadric_param import SuperQuadricParams
+from .superquadric_param import SuperQuadricParams
 
 # compute the implicit function value for each point
 # return an array of shape (N,) with the distance from each point to the superquadric surface
@@ -70,3 +70,34 @@ def superquadric_radial_residual(model: SuperQuadricParams, points: np.ndarray, 
     f = implicit_f_superquadric_residual(model, points)
     r_surface = r * np.maximum(f + 1.0, eps) ** (-model.e1 / 2.0)
     return r - r_surface
+
+# uses first-order residual for points whose direction is close to one of the 3 axes
+# (horizontal/vertical), and radial residual from center for diagonal points.
+# axis-alignment is measured in ellipsoid-normalised coordinates: if one component
+# dominates (> AXIS_THRESHOLD after normalisation) the point is considered axis-aligned.
+def superquadric_combo(model: SuperQuadricParams, points: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    R = model.rotation_matrix()
+    a1, a2, a3 = model.a1, model.a2, model.a3
+    AXIS_THRESHOLD = 0.7 # sensitivity of the axis distance (1 is full radial, 0 is full first order)
+
+    pc = (points - model.t) @ R 
+
+    # direction normalised by semi-axes so the measure is shape-aware
+    n = np.stack([np.abs(pc[:, 0] / a1),
+                  np.abs(pc[:, 1] / a2),
+                  np.abs(pc[:, 2] / a3)], axis=1)
+    n_norm = np.maximum(np.linalg.norm(n, axis=1, keepdims=True), eps)
+    n = n / n_norm  # each row is a unit vector; component > threshold → near that axis
+
+    use_axis   = n.max(axis=1) > AXIS_THRESHOLD
+    use_center = ~use_axis
+
+    residuals = np.zeros(len(points), dtype=np.float64)
+
+    if use_center.any():
+        residuals[use_center] = superquadric_radial_residual(model, points[use_center], eps)
+
+    if use_axis.any():
+        residuals[use_axis] = superquadric_first_order_residual(model, points[use_axis], eps)
+
+    return residuals

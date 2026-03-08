@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from typing import Optional
 import numpy as np
-from superquadric_param import SuperQuadricParams
+from src.superquadrics.superquadric_param import SuperQuadricParams
 from scipy.optimize import least_squares
 from .consensus import compute_consensus
-from .superquadric_residual import *  
+from src.superquadrics.superquadric_residual import *  
 
 
 @dataclass
@@ -75,7 +75,7 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
     upper = np.array([a_max, a_max, a_max, e_max, e_max,ang_max, ang_max, ang_max,maxs[0] + t_margin, maxs[1] + t_margin, maxs[2] + t_margin], dtype=np.float64)
     theta0p= np.array([theta0.a1, theta0.a2, theta0.a3, theta0.e1, theta0.e2, theta0.rot[0], theta0.rot[1], theta0.rot[2], theta0.t[0], theta0.t[1], theta0.t[2]], dtype=np.float64)
     res = least_squares(
-        fun=lambda x, pts: superquadric_first_order_residual(
+        fun=lambda x, pts: superquadric_combo(
             SuperQuadricParams(
                 a1=x[0],
                 a2=x[1],
