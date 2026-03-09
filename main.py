@@ -16,15 +16,10 @@ def create_and_estimate_supq():
     test = SuperQuadricParams(3,3,3,3.5,2.09,[2,2,1],[5,5,5])
     mesh = supmesh.superquadric_mesh(test)
 
-    test2 = SuperQuadricParams(3,3,3,2.5,3,[3,2,1],[0,0,0])
-    mesh2 = supmesh.superquadric_mesh(test2)
-
-
     list_mesh = []
     list_mesh.append(mesh)
     colors.append("lightblue")
-    #list_mesh.append(mesh2)
-    #colors.append("lightblue")
+
 
     #----those functions return a set of sample and their normals-----------
     #sampled_points,normals = samp.sampling_sq(list_mesh, n_points=1000)
@@ -51,7 +46,9 @@ def create_and_estimate_supq():
         list_mesh.append(mesh_estimated)
         colors.append("lightgreen")
     elif algorithm == "gair-ransac":
-        models, inliers_masks = gair_ransac(sampled_points, normals, threshold=0.07, max_models=2)
+        # Radius is expressed as a fraction of the point cloud bounding-box diagonal.
+        graph_radius = 0.06
+        models, inliers_masks = gair_ransac(sampled_points, normals, threshold=0.6, max_models=5, radius=graph_radius)
         for model in models:
             mesh_estimated = supmesh.superquadric_mesh(model)
             list_mesh.append(mesh_estimated)

@@ -19,7 +19,7 @@ def compare_consensus(prev_mask: np.ndarray, new_mask: np.ndarray, min_gain: int
     return int(new_mask.sum()) >= int(prev_mask.sum()) + min_gain
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 2, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.5, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
+def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 2, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
     # Convert inputs to standard float arrays
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     normals: FloatArray = np.asarray(normals, dtype=np.float64)
@@ -40,8 +40,8 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
         # Initialize best-so-far model and inlier set for the current residual
         best_model: Optional[SuperQuadricParams] = None
         best_inliers: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
-        # Build the graph once for the current residual
-        G, edge = build_radius_graph(current_point_cloud, m_neighbors=m_neighbors, radius=radius)
+        # Build the graph once for the current residual using a scale-aware radius.
+        _, edge = build_radius_graph(current_point_cloud,m_neighbors=m_neighbors,radius=radius,radius_is_relative=radius_is_relative,)
         edge: IntArray = np.asarray(edge, dtype=np.int64)
         # Main RANSAC loop over m hypotheses-------------EXTERNAL RANSAC----------------
         for j in range(max_iterations):
@@ -88,9 +88,9 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     continue
                 # The inlier mask returned by inner_ransac is defined on actual_set_index
                 # Update the current solution only if consensus improves
-                """if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):"""
-                # it doesn't work well. the paper for some reason doesn't use c_hat... but with c_hat it works much better.
-                # so let's use it
+                # if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):
+                # It does not work well. The paper does not use c_hat, but with c_hat
+                # the update is much more stable in this implementation.
                 new_inliers_mask: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
                 new_inliers_mask[actual_set_index[inner_result.best_inliers_mask]] = True
                 new_count: int = int(np.count_nonzero(new_inliers_mask))

@@ -212,3 +212,5 @@ __marimo__/
 
 src/3d_superquadric_decomposition/visn.py
 src/3d_superquadric_decomposition/gair_ransac/initnormals.py
+.python-version
+pyproject.toml
