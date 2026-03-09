@@ -9,11 +9,14 @@ from point_cloud_utils import k_nearest_neighbors, chamfer_distance
 from scipy.spatial import cKDTree
 from src.gair_ransac.gair_ransac import gair_ransac
 
+NOISE_STD = 0.4
+THRESHOLD = 3*NOISE_STD
+
 def create_and_estimate_supq():
     colors: list[str] = []
     # add a superquadric to the scene, sample points then try to fit a superquadric to the points, visualize the results
     # lightblue is the original superquadric, lightgreen is the estimated superquadric
-    test = SuperQuadricParams(3,3,3,3.5,2.09,[2,2,1],[5,5,5])
+    test = SuperQuadricParams(5,10,3,3,0.5,[2,2,1],[5,5,5])
     mesh = supmesh.superquadric_mesh(test)
 
     list_mesh = []
@@ -23,16 +26,15 @@ def create_and_estimate_supq():
 
     #----those functions return a set of sample and their normals-----------
     #sampled_points,normals = samp.sampling_sq(list_mesh, n_points=1000)
-    sampled_points_noisy,normals_sp_noisy = samp.sampling_sq_noisy(list_mesh, n_points=4000, noise_std=0.2, clip_k=3.0, seed=42)#list 
-    sampled_points_random, normals_sp_random = samp.sampling_sq_random(
-        list_mesh, n_points=4000, seed=42
-    )
+    sampled_points_noisy,normals_sp_noisy = samp.sampling_sq_noisy(list_mesh, n_points=30000, noise_std=NOISE_STD, clip_k=3.0, seed=42)#list 
+    sampled_points_random, normals_sp_random = samp.sampling_sq_random(list_mesh, n_points=4000, seed=42)
     sampled_points_random = np.vstack(sampled_points_random).astype(np.float32, copy=False)
     sampled_points_outliers,normals_sp_outliers = samp.sampling_outliers(list_mesh, n_out=400, margin=0.10, mode="uniform", seed=42) #array 2D (N_out, 3)
-    algorithm="ransac"
+    algorithm="gair-ransac"
     #------choose here which kind of points to use for fitting the superquadric------
-    sampled_points = np.vstack(sampled_points_noisy).astype(np.float32, copy=False)
-    normals = np.vstack(normals_sp_noisy).astype(np.float32, copy=False)
+    sampled_points = np.vstack([*sampled_points_noisy, sampled_points_outliers]).astype(np.float32, copy=False)
+    normals = np.vstack([*normals_sp_noisy, normals_sp_outliers]).astype(np.float32, copy=False)
+    mesh_estimated = None
     if algorithm == "ls":
 
         small_sample = sampled_points[:30] # just for testing, should be sampled from the gair set
@@ -41,14 +43,16 @@ def create_and_estimate_supq():
         list_mesh.append(mesh_estimated)
         colors.append("lightgreen")
     elif algorithm == "ransac":
-        theta0:InnerRansacResult = inner_ransac(sampled_points, refined_set_index=np.arange(sampled_points.shape[0]), actual_set_index=np.arange(sampled_points.shape[0]), threshold=0.07)
+        theta0:InnerRansacResult = inner_ransac(sampled_points, refined_set_index=np.arange(sampled_points.shape[0]), actual_set_index=np.arange(sampled_points.shape[0]), threshold=THRESHOLD)
         mesh_estimated = supmesh.superquadric_mesh(theta0.best_model)
         list_mesh.append(mesh_estimated)
         colors.append("lightgreen")
     elif algorithm == "gair-ransac":
         # Radius is expressed as a fraction of the point cloud bounding-box diagonal.
         graph_radius = 0.06
-        models, inliers_masks = gair_ransac(sampled_points, normals, threshold=0.6, max_models=5, radius=graph_radius)
+        models, inliers_masks = gair_ransac(sampled_points, normals, threshold=THRESHOLD, max_models=1, radius=graph_radius)
+        if not models:
+            raise RuntimeError("gair_ransac did not return any model")
         for model in models:
             mesh_estimated = supmesh.superquadric_mesh(model)
             list_mesh.append(mesh_estimated)
