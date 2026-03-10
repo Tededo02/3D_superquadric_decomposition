@@ -10,26 +10,18 @@ def gair(
     normals: np.ndarray,
     model: SuperQuadricParams,
     eps: float,
+    error_metric: str = "mix",
     pair_weight: float = 1.0,
     coh_min: float = 0.05,
     outlier_scale: float = 3.0,
 ) -> np.ndarray:
-    """
-    GAIR: Geometric Aware Inlier Refinement via Graph-Cut.
-
-    Args:
-        points: (N,3)
-        edges: (E,2) undirected edges with i<j
-        normals: (N,3) unit normals
-        model: current superquadric
-        eps: inlier threshold epsilon
-        pair_weight: weight for pairwise smoothness term
-        coh_min: prune edges with too low normal coherence C
-        outlier_scale: scaling for d_pair ~ dist/(outlier_scale*eps)
-
-    Returns:
-        inliers_mask: (N,) bool (True=inlier)
-    """
+    # GAIR: Geometric Aware Inlier Refinement via Graph-Cut.
+    # points: (N, 3)
+    # edges: (E, 2) undirected edges with i < j
+    # normals: (N, 3) unit normals
+    # model: current superquadric
+    # eps: inlier threshold epsilon
+    # error_metric: residual used for unary costs
     points = np.asarray(points, dtype=np.float64)
     normals = np.asarray(normals, dtype=np.float64)
     N = points.shape[0]
@@ -37,7 +29,7 @@ def gair(
         raise ValueError(f"normals must have shape {(N,3)}, got {normals.shape}")
 
     # distances/residuals
-    dist = distance_err(model, points)  # (N,)
+    dist = distance_err(model, points, error_metric=error_metric)  # (N,)
     d_unary = np.clip(dist / (eps + 1e-12), 0.0, 1.0)
     d_pair = np.clip(dist / (outlier_scale * eps + 1e-12), 0.0, 1.0)
 

@@ -19,10 +19,11 @@ def compare_consensus(prev_mask: np.ndarray, new_mask: np.ndarray, min_gain: int
     return int(new_mask.sum()) >= int(prev_mask.sum()) + min_gain
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 2, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
+def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 2, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "mix", inner_iterations: int = 50, random_seed: int | None = None) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
     # Convert inputs to standard float arrays
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     normals: FloatArray = np.asarray(normals, dtype=np.float64)
+    rng = np.random.default_rng(random_seed)
     # Store total number of points in the original point cloud
     n_points: int = point_cloud.shape[0]
     # Initialize the set of indices still available for sequential extraction
@@ -47,12 +48,12 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
         for j in range(max_iterations):
             # Draw a non-minimal sample set and estimate a candidate model
             try:
-                M_j: FloatArray = np.asarray(spatial_walk_mss(current_point_cloud, V, sample_size=sample_size), dtype=np.float64)
-                H_j: SuperQuadricParams = fit_superquadric_ls(M_j)
+                M_j: FloatArray = np.asarray(spatial_walk_mss(current_point_cloud, V, sample_size=sample_size, rng=rng), dtype=np.float64)
+                H_j: SuperQuadricParams = fit_superquadric_ls(M_j, error_metric=error_metric)
             except Exception:
                 continue
             # Compute the standard consensus set of the candidate model
-            candidate_inliers: BoolArray = np.asarray(compute_consensus(H_j, current_point_cloud, threshold), dtype=bool)
+            candidate_inliers: BoolArray = np.asarray(compute_consensus(H_j, current_point_cloud, threshold, error_metric=error_metric), dtype=bool)
             # Count current candidate inliers and current best inliers
             candidate_count: int = int(np.count_nonzero(candidate_inliers))
             best_count: int = int(np.count_nonzero(best_inliers))
@@ -67,7 +68,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             # Local optimization loop: GAIR + inner RANSAC + consensus comparison
             while not terminate:
                 # Refine the current inlier set with GAIR
-                refined_inliers: BoolArray = np.asarray(gair(points=current_point_cloud, edges=edge, normals=V, model=current_model, eps=threshold), dtype=bool)
+                refined_inliers: BoolArray = np.asarray(gair(points=current_point_cloud, edges=edge, normals=V, model=current_model, eps=threshold, error_metric=error_metric), dtype=bool)
                 refined_count: int = int(np.count_nonzero(refined_inliers))
                 # Stop if the refined set is too small
                 if refined_count < min_inliers:
@@ -81,7 +82,15 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 # actual_set_index is all_current_index because inner_ransac will compute consensus on the whole residual cloud, not only on the refined set. 
                 # with some test, this way is better because it allows inner_ransac to find a better model that fits more points in the residual
                 # anyway, stick to the paper so use actual_set_index=refined_set_index
-                inner_result: InnerRansacResult = inner_ransac(current_point_cloud, refined_set_index, actual_set_index, threshold)
+                inner_result: InnerRansacResult = inner_ransac(
+                    current_point_cloud,
+                    refined_set_index,
+                    actual_set_index,
+                    threshold,
+                    error_metric=error_metric,
+                    n_iters=inner_iterations,
+                    random_seed=int(rng.integers(0, np.iinfo(np.int32).max)),
+                )
                 # Stop if inner RANSAC fails
                 if inner_result.best_inlier_count <= 0:
                     terminate = True
@@ -125,7 +134,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
         inliers_set.append(global_inliers)
 
         # Remove the inliers of the extracted model from the residual set and all the points too close to it
-        remove_mask = expanded_removal_mask(best_model, current_point_cloud, threshold, factor=1.3)
+        remove_mask = expanded_removal_mask(best_model, current_point_cloud, threshold, factor=1.3, error_metric=error_metric)
         remaining_indices = remaining_indices[~remove_mask]
         # Return all extracted models and their global inlier masks
     return models_set, inliers_set

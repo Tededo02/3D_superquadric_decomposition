@@ -101,3 +101,23 @@ def superquadric_combo(model: SuperQuadricParams, points: np.ndarray, eps: float
         residuals[use_axis] = superquadric_first_order_residual(model, points[use_axis], eps)
 
     return residuals
+
+
+def superquadric_residual_vector(
+    model: SuperQuadricParams,
+    points: np.ndarray,
+    metric: str = "mix",
+    eps: float = 1e-12,
+) -> np.ndarray:
+    metric_name = metric.lower().replace("-", "_").replace(" ", "_")
+
+    if metric_name == "radial":
+        return superquadric_radial_residual(model, points, eps)
+
+    if metric_name == "first_order":
+        return superquadric_first_order_residual(model, points, eps)
+
+    if metric_name == "mix":
+        return superquadric_combo(model, points, eps)
+
+    raise ValueError(f"Unsupported residual metric: {metric}")

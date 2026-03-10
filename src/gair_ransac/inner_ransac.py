@@ -4,7 +4,7 @@ import numpy as np
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from scipy.optimize import least_squares
 from .consensus import compute_consensus
-from src.superquadrics.superquadric_residual import *  
+from src.superquadrics.superquadric_residual import superquadric_residual_vector
 
 
 @dataclass
@@ -55,9 +55,9 @@ def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
     t = mean
     return SuperQuadricParams(a1=a1, a2=a2, a3=a3, e1=1.0, e2=1.0, rot=np.array(rot), t=np.array(t))
 
-# fit superquadric to points using non linear least squares with loss soft_l1.
-# initialization via PCA and bbox
-def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
+# Fit a superquadric to points using non-linear least squares with loss soft_l1.
+# Initialization is based on PCA and robust bounding-box estimates.
+def fit_superquadric_ls(points: np.ndarray, error_metric: str = "mix") -> SuperQuadricParams:
     if points.shape[0]<11:
         raise ValueError ("too few points for a stable superqadric fit")
     theta0: SuperQuadricParams
@@ -75,7 +75,7 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
     upper = np.array([a_max, a_max, a_max, e_max, e_max,ang_max, ang_max, ang_max,maxs[0] + t_margin, maxs[1] + t_margin, maxs[2] + t_margin], dtype=np.float64)
     theta0p= np.array([theta0.a1, theta0.a2, theta0.a3, theta0.e1, theta0.e2, theta0.rot[0], theta0.rot[1], theta0.rot[2], theta0.t[0], theta0.t[1], theta0.t[2]], dtype=np.float64)
     res = least_squares(
-        fun=lambda x, pts: superquadric_combo(
+        fun=lambda x, pts: superquadric_residual_vector(
             SuperQuadricParams(
                 a1=x[0],
                 a2=x[1],
@@ -86,6 +86,7 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
                 t=np.array(x[8:11], dtype=np.float64),
             ),
             pts,
+            metric=error_metric,
         ),
         x0=theta0p,
         args=(points,),
@@ -107,12 +108,19 @@ def fit_superquadric_ls(points:np.ndarray)-> SuperQuadricParams:
     )
 
 
-def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actual_set_index: int,threshold: float ) -> InnerRansacResult:
+def inner_ransac(
+    point_cloud: np.ndarray[np.ndarray],
+    refined_set_index: int,
+    actual_set_index: int,
+    threshold: float,
+    error_metric: str = "mix",
+    n_iters: int = 50,
+    random_seed: int | None = None,
+) -> InnerRansacResult:
     points:np.ndarray
-    n_iters: int = 50
     sample_size:int = 30 # minimum number of points to fit a superquadric (11 parameters)
     result: InnerRansacResult
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(random_seed)
     model: SuperQuadricParams
     best_model: Optional[SuperQuadricParams] = None
     best_inliers: np.ndarray = np.empty((0,), dtype=bool)
@@ -124,10 +132,10 @@ def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actu
         points=point_cloud[sample_idx]
         # model estimation via pca
         try:
-            model = fit_superquadric_ls(points)
+            model = fit_superquadric_ls(points, error_metric=error_metric)
         except Exception:
             continue
-        inlier_set_index = compute_consensus(model, point_cloud[actual_set_index], threshold)
+        inlier_set_index = compute_consensus(model, point_cloud[actual_set_index], threshold, error_metric=error_metric)
         count = int(np.count_nonzero(inlier_set_index))
         if count > best_count:
             best_count = count
@@ -142,8 +150,8 @@ def inner_ransac(point_cloud: np.ndarray[np.ndarray],refined_set_index: int,actu
     inlier_points = actual_points[best_inliers]
     if inlier_points.shape[0] >= 11:
         try:
-            refit_model = fit_superquadric_ls(inlier_points)
-            refit_inlier_set_index = compute_consensus(refit_model, actual_points, threshold)
+            refit_model = fit_superquadric_ls(inlier_points, error_metric=error_metric)
+            refit_inlier_set_index = compute_consensus(refit_model, actual_points, threshold, error_metric=error_metric)
             refit_count = int(np.count_nonzero(refit_inlier_set_index))
             if refit_count >= best_count:
                 best_model = refit_model
