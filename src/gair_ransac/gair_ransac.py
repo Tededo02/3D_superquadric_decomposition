@@ -19,7 +19,7 @@ def compare_consensus(prev_mask: np.ndarray, new_mask: np.ndarray, min_gain: int
     return int(new_mask.sum()) >= int(prev_mask.sum()) + min_gain
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 2, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "mix", inner_iterations: int = 50, random_seed: int | None = None) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
+def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 2, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "mix", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
     # Convert inputs to standard float arrays
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     normals: FloatArray = np.asarray(normals, dtype=np.float64)
@@ -68,7 +68,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             # Local optimization loop: GAIR + inner RANSAC + consensus comparison
             while not terminate:
                 # Refine the current inlier set with GAIR
-                refined_inliers: BoolArray = np.asarray(gair(points=current_point_cloud, edges=edge, normals=V, model=current_model, eps=threshold, error_metric=error_metric), dtype=bool)
+                refined_inliers: BoolArray = np.asarray(gair(points=current_point_cloud, edges=edge, normals=V, model=current_model, eps=threshold, error_metric=error_metric, use_normal_coherence=use_normal_coherence), dtype=bool)
                 refined_count: int = int(np.count_nonzero(refined_inliers))
                 # Stop if the refined set is too small
                 if refined_count < min_inliers:

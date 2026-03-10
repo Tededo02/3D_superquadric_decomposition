@@ -1,8 +1,7 @@
 import os
 from pathlib import Path
 
-# This script benchmarks misclassification error versus noise with a fixed inlier threshold.
-# its aim is to show how bad misclassification can get when the noise increases but the threshold is not adapted.
+# This script benchmarks misclassification error versus threshold scale factor at fixed noise.
 # Keep one BLAS thread per worker to avoid oversubscription when using many processes.
 BLAS_THREADS_PER_WORKER = 1
 if BLAS_THREADS_PER_WORKER is not None:
@@ -11,45 +10,46 @@ if BLAS_THREADS_PER_WORKER is not None:
     os.environ["MKL_NUM_THREADS"] = str(BLAS_THREADS_PER_WORKER)
     os.environ["NUMEXPR_NUM_THREADS"] = str(BLAS_THREADS_PER_WORKER)
 
-from benchmark_common import run_benchmark
+
+from benchmark_common import run_scale_factor_benchmark
+
+
+
 # Edit these variables
-NOISE_VALUES = None
-NOISE_START = 0.1
-NOISE_STOP = 2.0
-NOISE_STEP = 0.1
+FIXED_NOISE_STD = 0.6
+SCALE_VALUES = None # If None, it will be generated from SCALE_START, SCALE_STOP and SCALE_STEP
+SCALE_START = 1.5
+SCALE_STOP = 6.5
+SCALE_STEP = 0.5
 RUNS = 1
 N_SURFACE_POINTS = 10000
 N_OUTLIERS = 500
-THRESHOLD = 3.0 
 GRAPH_RADIUS = 0.06  # Relative to the bounding box diagonal.
 MAX_ITERATIONS = 150
 INNER_ITERATIONS = 50
 MAX_WORKERS = None  # None uses all available CPU cores.
 USE_MULTIPROCESSING = True
 BASE_SEED = 42
-OUTPUT_DIR = Path("artifacts") / "noise_vs_misclassification"
+OUTPUT_DIR = Path("artifacts") / "scale_factor_vs_misclassification"
 CURVES = [
-    ("RANSAC", "ransac", "first_order", True),
-#    ("GAIR-RANSAC radial", "gair-ransac", "radial", True),
+    ("RANSAC", "ransac", "mix", True),
     ("GAIR-RANSAC first-order", "gair-ransac", "first_order", True),
-#    ("GAIR-RANSAC mixed", "gair-ransac", "mix", True),
 ]
 
 
 def main() -> int:
-    return run_benchmark(
-        title=f"Noise vs misclassification error - fixed threshold = {THRESHOLD}",
+    return run_scale_factor_benchmark(
+        title=f"Scale factor vs misclassification error - fixed noise_std = {FIXED_NOISE_STD}",
         output_dir=OUTPUT_DIR,
         curves=CURVES,
-        noise_values=NOISE_VALUES,
-        noise_start=NOISE_START,
-        noise_stop=NOISE_STOP,
-        noise_step=NOISE_STEP,
+        fixed_noise_std=FIXED_NOISE_STD,
+        scale_values=SCALE_VALUES,
+        scale_start=SCALE_START,
+        scale_stop=SCALE_STOP,
+        scale_step=SCALE_STEP,
         runs=RUNS,
         n_surface_points=N_SURFACE_POINTS,
         n_outliers=N_OUTLIERS,
-        threshold_value=THRESHOLD,
-        threshold_scale=None,
         graph_radius=GRAPH_RADIUS,
         max_iterations=MAX_ITERATIONS,
         inner_iterations=INNER_ITERATIONS,

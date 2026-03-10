@@ -11,6 +11,7 @@ def gair(
     model: SuperQuadricParams,
     eps: float,
     error_metric: str = "mix",
+    use_normal_coherence: bool = True,
     pair_weight: float = 1.0,
     coh_min: float = 0.05,
     outlier_scale: float = 3.0,
@@ -49,12 +50,13 @@ def gair(
     # - add Potts edge with weight w
     # - add outlier unary correction a/2 on both endpoints
     for (p, q) in edges:
-        # coherence C in [0,1]
-        C = 0.5 * (1.0 + float(np.dot(normals[p], normals[q])))
-
-        # prune low-coherence edges (paper heuristic)
-        if C <= coh_min:
-            continue
+        # Use the normal-driven coherence term only when requested.
+        if use_normal_coherence:
+            C = 0.5 * (1.0 + float(np.dot(normals[p], normals[q])))
+            if C <= coh_min:
+                continue
+        else:
+            C = 1.0
 
         # E00 = C*(1 - (d_p + d_q)/2)
         a = C * (1.0 - 0.5 * (d_pair[p] + d_pair[q]))

@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-# This script benchmarks misclassification error versus noise with a fixed inlier threshold.
-# its aim is to show how bad misclassification can get when the noise increases but the threshold is not adapted.
+# This script benchmarks misclassification error versus noise with threshold proportional to noise.
+# its aim to show how where we have a minimum of misclassification error when the threshold is well adapted to the noise level
 # Keep one BLAS thread per worker to avoid oversubscription when using many processes.
 BLAS_THREADS_PER_WORKER = 1
 if BLAS_THREADS_PER_WORKER is not None:
@@ -11,34 +11,34 @@ if BLAS_THREADS_PER_WORKER is not None:
     os.environ["MKL_NUM_THREADS"] = str(BLAS_THREADS_PER_WORKER)
     os.environ["NUMEXPR_NUM_THREADS"] = str(BLAS_THREADS_PER_WORKER)
 
+
 from benchmark_common import run_benchmark
+
 # Edit these variables
 NOISE_VALUES = None
 NOISE_START = 0.1
-NOISE_STOP = 2.0
+NOISE_STOP = 1.0
 NOISE_STEP = 0.1
 RUNS = 1
 N_SURFACE_POINTS = 10000
 N_OUTLIERS = 500
-THRESHOLD = 3.0 
+THRESHOLD_SCALE = 3.0
 GRAPH_RADIUS = 0.06  # Relative to the bounding box diagonal.
 MAX_ITERATIONS = 150
 INNER_ITERATIONS = 50
 MAX_WORKERS = None  # None uses all available CPU cores.
 USE_MULTIPROCESSING = True
 BASE_SEED = 42
-OUTPUT_DIR = Path("artifacts") / "noise_vs_misclassification"
+OUTPUT_DIR = Path("artifacts") / "noise_vs_misclassification_scale_factor"
 CURVES = [
-    ("RANSAC", "ransac", "first_order", True),
-#    ("GAIR-RANSAC radial", "gair-ransac", "radial", True),
-    ("GAIR-RANSAC first-order", "gair-ransac", "first_order", True),
-#    ("GAIR-RANSAC mixed", "gair-ransac", "mix", True),
+    ("RANSAC", "ransac", "mix", True),
+    ("GAIR-RANSAC mixed", "gair-ransac", "mix", True),
 ]
 
 
 def main() -> int:
     return run_benchmark(
-        title=f"Noise vs misclassification error - fixed threshold = {THRESHOLD}",
+        title=f"Noise vs misclassification error - threshold = {THRESHOLD_SCALE} * noise_std",
         output_dir=OUTPUT_DIR,
         curves=CURVES,
         noise_values=NOISE_VALUES,
@@ -48,8 +48,8 @@ def main() -> int:
         runs=RUNS,
         n_surface_points=N_SURFACE_POINTS,
         n_outliers=N_OUTLIERS,
-        threshold_value=THRESHOLD,
-        threshold_scale=None,
+        threshold_value=None,
+        threshold_scale=THRESHOLD_SCALE,
         graph_radius=GRAPH_RADIUS,
         max_iterations=MAX_ITERATIONS,
         inner_iterations=INNER_ITERATIONS,
