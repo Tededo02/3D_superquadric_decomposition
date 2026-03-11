@@ -37,7 +37,7 @@ def gair(
     # unary costs (paper eq. (5)):
     # cost(inlier) = err (normalized), cost(outlier) = 1
     cost_inlier = d_unary.copy()
-    cost_outlier = np.ones(N, dtype=np.float64)
+    cost_outlier = np.zeros(N, dtype=np.float64)
 
     # We'll accumulate extra outlier unary costs derived from pairwise E00
     outlier_add = np.zeros(N, dtype=np.float64)
