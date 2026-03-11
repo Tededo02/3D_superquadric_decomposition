@@ -15,22 +15,23 @@ from benchmark_common import run_benchmark
 # Edit these variables
 NOISE_VALUES = None
 NOISE_START = 0.1
-NOISE_STOP = 2.0
+NOISE_STOP = 1.0
 NOISE_STEP = 0.1
 RUNS = 1
 N_SURFACE_POINTS = 15000
-N_OUTLIERS = 500
+N_OUTLIERS = 1000
 THRESHOLD_SCALE = 3.0
 GRAPH_RADIUS = 0.06  # Relative to the bounding box diagonal.
-MAX_ITERATIONS = 150
-INNER_ITERATIONS = 100
-MAX_WORKERS = None  # None uses all available CPU cores.
+MAX_ITERATIONS = 10
+INNER_ITERATIONS = 10
+MAX_WORKERS = 4  # None uses all available CPU cores.
 USE_MULTIPROCESSING = True
 BASE_SEED = 42
 OUTPUT_DIR = Path("artifacts") / "noise_vs_misclassification_without_normals"
 CURVES = [
     ("GAIR-RANSAC with normals", "gair-ransac", "first_order", True),
     ("GAIR-RANSAC without normals", "gair-ransac", "first_order", False),
+    ("RANSAC", "ransac", "first_order", True),
 ]
 
 

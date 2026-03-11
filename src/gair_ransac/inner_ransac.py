@@ -74,6 +74,9 @@ def fit_superquadric_ls(points: np.ndarray, error_metric: str = "mix") -> SuperQ
     lower = np.array([a_min, a_min, a_min, e_min, e_min,ang_min, ang_min, ang_min,mins[0] - t_margin, mins[1] - t_margin, mins[2] - t_margin], dtype=np.float64)
     upper = np.array([a_max, a_max, a_max, e_max, e_max,ang_max, ang_max, ang_max,maxs[0] + t_margin, maxs[1] + t_margin, maxs[2] + t_margin], dtype=np.float64)
     theta0p= np.array([theta0.a1, theta0.a2, theta0.a3, theta0.e1, theta0.e2, theta0.rot[0], theta0.rot[1], theta0.rot[2], theta0.t[0], theta0.t[1], theta0.t[2]], dtype=np.float64)
+    # Some MSS samples are locally thin, so the PCA sizes can fall just outside the box constraints.
+    # Project the initial guess inside the feasible region to keep least_squares stable.
+    theta0p = np.clip(theta0p, lower, upper)
     res = least_squares(
         fun=lambda x, pts: superquadric_residual_vector(
             SuperQuadricParams(

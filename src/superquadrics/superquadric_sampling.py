@@ -26,11 +26,13 @@ def sampling_sq_random(mesh_list: list[Trimesh], n_points: int = 1000, seed: int
         normals_list.append(normals)
     return points_list, normals_list
 
-# sample points on the surface of the superquadric meshes with noise along the normal direction. 
-def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: float = 0.01,clip_k: float | None = 3.0,seed: int | None = None,) -> tuple[list[np.ndarray], list[np.ndarray]]:
+# sample points on the surface of the superquadric meshes with noise along the normal direction.
+# Returned normals can also be perturbed with Gaussian noise around the exact direction.
+def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: float = 0.01,normal_noise_std: float | None = None,clip_k: float | None = 3.0,seed: int | None = None,) -> tuple[list[np.ndarray], list[np.ndarray]]:
     rng = np.random.default_rng(seed)
     points_list: list[np.ndarray] = []
     normals_list: list[np.ndarray] = []
+    normal_noise_std = 0.0 if normal_noise_std is None else normal_noise_std
 
     for mesh in mesh_list:
         # sample points on surface + get which face each point came from
@@ -45,9 +47,19 @@ def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: f
             alpha = np.clip(alpha, -clip_k * noise_std, clip_k * noise_std)
         # move each point only along its normal
         pts_noisy = pts + normals * alpha  # (N,3)
+        # perturb normals with additive Gaussian noise centered on the exact direction
+        if normal_noise_std > 0.0:
+            normal_delta = rng.normal(loc=0.0, scale=normal_noise_std, size=normals.shape).astype(np.float32)
+            if clip_k is not None:
+                normal_delta = np.clip(normal_delta, -clip_k * normal_noise_std, clip_k * normal_noise_std)
+            normals_noisy = normals + normal_delta
+            normals_noisy /= np.linalg.norm(normals_noisy, axis=1, keepdims=True) + 1e-12
+            normals_noisy = normals_noisy.astype(np.float32, copy=False)
+        else:
+            normals_noisy = normals
 
         points_list.append(pts_noisy)
-        normals_list.append(normals)
+        normals_list.append(normals_noisy)
 
     return points_list, normals_list
 
@@ -62,7 +74,7 @@ def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: flo
     seed: int | None = None,
 ) ->tuple[ np.ndarray[np.ndarray], np.ndarray[np.ndarray]]:
     if n_out <= 0:
-        return np.empty((0, 3), dtype=np.float32)
+        return np.empty((0, 3), dtype=np.float32), np.empty((0, 3), dtype=np.float32)
 
     rng = np.random.default_rng(seed)
 

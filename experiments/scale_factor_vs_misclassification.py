@@ -18,15 +18,15 @@ from benchmark_common import run_scale_factor_benchmark
 # Edit these variables
 FIXED_NOISE_STD = 0.6
 SCALE_VALUES = None # If None, it will be generated from SCALE_START, SCALE_STOP and SCALE_STEP
-SCALE_START = 1.5
-SCALE_STOP = 6.5
+SCALE_START = 0.0
+SCALE_STOP = 4.5
 SCALE_STEP = 0.5
 RUNS = 1
 N_SURFACE_POINTS = 10000
-N_OUTLIERS = 500
+N_OUTLIERS = 0
 GRAPH_RADIUS = 0.06  # Relative to the bounding box diagonal.
-MAX_ITERATIONS = 150
-INNER_ITERATIONS = 50
+MAX_ITERATIONS = 10
+INNER_ITERATIONS = 10
 MAX_WORKERS = None  # None uses all available CPU cores.
 USE_MULTIPROCESSING = True
 BASE_SEED = 42

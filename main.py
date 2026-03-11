@@ -9,14 +9,14 @@ from point_cloud_utils import k_nearest_neighbors, chamfer_distance
 from scipy.spatial import cKDTree
 from src.gair_ransac.gair_ransac import gair_ransac
 
-NOISE_STD = 0.4
+NOISE_STD = 0.5
 THRESHOLD = 3*NOISE_STD
 
 def create_and_estimate_supq():
     colors: list[str] = []
     # add a superquadric to the scene, sample points then try to fit a superquadric to the points, visualize the results
     # lightblue is the original superquadric, lightgreen is the estimated superquadric
-    test = SuperQuadricParams(5,10,3,3,0.5,[2,2,1],[5,5,5])
+    test = SuperQuadricParams(9.0, 9.0, 9.0, 3.5, 2.09, [2.0, 2.0, 1.0], [5.0, 5.0, 5.0])
     mesh = supmesh.superquadric_mesh(test)
 
     list_mesh = []
@@ -50,7 +50,7 @@ def create_and_estimate_supq():
     elif algorithm == "gair-ransac":
         # Radius is expressed as a fraction of the point cloud bounding-box diagonal.
         graph_radius = 0.06
-        models, inliers_masks = gair_ransac(sampled_points, normals, threshold=THRESHOLD, max_models=1, radius=graph_radius)
+        models, inliers_masks = gair_ransac(sampled_points, normals, threshold=THRESHOLD, max_models=1,max_iterations=10,inner_iterations=10, radius=graph_radius)
         if not models:
             raise RuntimeError("gair_ransac did not return any model")
         for model in models:

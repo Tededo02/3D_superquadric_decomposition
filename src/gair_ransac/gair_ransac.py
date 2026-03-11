@@ -19,7 +19,7 @@ def compare_consensus(prev_mask: np.ndarray, new_mask: np.ndarray, min_gain: int
     return int(new_mask.sum()) >= int(prev_mask.sum()) + min_gain
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 2, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "mix", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
+def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "mix", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
     # Convert inputs to standard float arrays
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     normals: FloatArray = np.asarray(normals, dtype=np.float64)
@@ -44,13 +44,21 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
         # Build the graph once for the current residual using a scale-aware radius.
         _, edge = build_radius_graph(current_point_cloud,m_neighbors=m_neighbors,radius=radius,radius_is_relative=radius_is_relative,)
         edge: IntArray = np.asarray(edge, dtype=np.int64)
+        # Temporary debug mode: fit a single hypothesis using the whole residual cloud.
+        # SETTARE A TRUE PER I TEST CON TUTTA POINT CLOUD---------------------------
+        use_full_cloud_hypothesis = False
+        n_hypotheses = 1 if use_full_cloud_hypothesis else max_iterations
         # Main RANSAC loop over m hypotheses-------------EXTERNAL RANSAC----------------
-        for j in range(max_iterations):
+        for j in range(n_hypotheses):
             # Draw a non-minimal sample set and estimate a candidate model
+            if use_full_cloud_hypothesis:
+                M_j: FloatArray = current_point_cloud.copy()
+            else:
+                M_j = np.asarray(spatial_walk_mss(current_point_cloud, V, sample_size=sample_size, rng=rng),dtype=np.float64,)
             try:
-                M_j: FloatArray = np.asarray(spatial_walk_mss(current_point_cloud, V, sample_size=sample_size, rng=rng), dtype=np.float64)
                 H_j: SuperQuadricParams = fit_superquadric_ls(M_j, error_metric=error_metric)
-            except Exception:
+            except Exception as e:
+                exception_message = f"Model fitting failed at iteration {j} with sample points:\n{M_j}\nError: {e}"
                 continue
             # Compute the standard consensus set of the candidate model
             candidate_inliers: BoolArray = np.asarray(compute_consensus(H_j, current_point_cloud, threshold, error_metric=error_metric), dtype=bool)
@@ -100,15 +108,28 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 # if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):
                 # It does not work well. The paper does not use c_hat, but with c_hat
                 # the update is much more stable in this implementation.
-                new_inliers_mask: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
-                new_inliers_mask[actual_set_index[inner_result.best_inliers_mask]] = True
-                new_count: int = int(np.count_nonzero(new_inliers_mask))
-                if new_count >= current_count + min_gain:
-                    current_inliers = new_inliers_mask
-                    current_count = new_count
+                """
+                new_inliers_mask_c_hat: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
+                new_inliers_mask_c_hat[actual_set_index[inner_result.best_inliers_mask]] = True
+
+                if compare_consensus(current_inliers, new_inliers_mask_c_hat, min_gain=min_gain):
+                    current_inliers = new_inliers_mask_c_hat
+                    current_count = int(np.count_nonzero(new_inliers_mask_c_hat))
                     current_model = inner_result.best_model
                 else:
                     terminate = True
+                
+                """
+                # The paper does not use c_hat, but with c_hat
+                # to here 
+                
+                if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):
+                    current_inliers = refined_inliers
+                    current_count = int(np.count_nonzero(refined_inliers))
+                    current_model = inner_result.best_model
+                else:
+                    terminate = True
+                
             # Update the best-so-far solution for the current residual
             if current_count > int(np.count_nonzero(best_inliers)):
                 best_model = current_model

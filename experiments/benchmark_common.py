@@ -33,13 +33,13 @@ def build_sweep_values(values: list[float] | None, start: float, stop: float, st
 
 
 def build_test_cloud(noise_std: float, n_surface_points: int, n_outliers: int, seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    sampled_points_noisy, normals_noisy = samp.sampling_sq_noisy([TEST_MESH], n_points=n_surface_points, noise_std=noise_std, clip_k=3.0, seed=seed)
+    sampled_points_noisy, normals_noisy = samp.sampling_sq_noisy([TEST_MESH], n_points=n_surface_points, noise_std=noise_std,normal_noise_std=0.5, clip_k=3.0, seed=seed)
     sampled_points_outliers, normals_outliers = samp.sampling_outliers([TEST_MESH], n_out=n_outliers, margin=0.10, mode="uniform", seed=seed + 10_000)
 
     surface_points = np.vstack(sampled_points_noisy).astype(np.float32, copy=False)
     surface_normals = np.vstack(normals_noisy).astype(np.float32, copy=False)
-    points = np.vstack([surface_points]).astype(np.float32, copy=False)
-    normals = np.vstack([surface_normals]).astype(np.float32, copy=False)
+    points = np.vstack([surface_points,sampled_points_outliers]).astype(np.float32, copy=False)
+    normals = np.vstack([surface_normals,normals_outliers]).astype(np.float32, copy=False)
 
     gt_inliers = np.zeros(points.shape[0], dtype=bool)
     gt_inliers[:surface_points.shape[0]] = True
