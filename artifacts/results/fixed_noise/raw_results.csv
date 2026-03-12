@@ -1,0 +1,91 @@
+curve,algorithm,error_metric,use_normal_coherence,classifier,noise_std,threshold_scale,threshold,run_idx,metric_value
+RANSAC,ransac,first_order,True,misclassification,0.6,0.0,0.001,0,0.9976
+RANSAC,ransac,first_order,True,misclassification,0.6,0.5,0.3,0,0.252
+RANSAC,ransac,first_order,True,misclassification,0.6,1.0,0.6,0,0.0924
+RANSAC,ransac,first_order,True,misclassification,0.6,1.5,0.8999999999999999,0,0.0628
+RANSAC,ransac,first_order,True,misclassification,0.6,2.0,1.2,0,0.0168
+RANSAC,ransac,first_order,True,misclassification,0.6,2.5,1.5,0,0.0058
+RANSAC,ransac,first_order,True,misclassification,0.6,3.0,1.7999999999999998,0,0.0011
+RANSAC,ransac,first_order,True,misclassification,0.6,3.5,2.1,0,0.0001
+RANSAC,ransac,first_order,True,misclassification,0.6,4.0,2.4,0,0.0001
+RANSAC,ransac,first_order,True,misclassification,0.6,4.5,2.6999999999999997,0,0.0
+GAIR-RANSAC first-order,gair-ransac,first_order,True,misclassification,0.6,0.0,0.001,0,1.0
+GAIR-RANSAC first-order,gair-ransac,first_order,True,misclassification,0.6,0.5,0.3,0,0.0013
+GAIR-RANSAC first-order,gair-ransac,first_order,True,misclassification,0.6,1.0,0.6,0,0.0006
+GAIR-RANSAC first-order,gair-ransac,first_order,True,misclassification,0.6,1.5,0.8999999999999999,0,0.0003
+GAIR-RANSAC first-order,gair-ransac,first_order,True,misclassification,0.6,2.0,1.2,0,0.0008
+GAIR-RANSAC first-order,gair-ransac,first_order,True,misclassification,0.6,2.5,1.5,0,0.0004
+GAIR-RANSAC first-order,gair-ransac,first_order,True,misclassification,0.6,3.0,1.7999999999999998,0,0.0004
+GAIR-RANSAC first-order,gair-ransac,first_order,True,misclassification,0.6,3.5,2.1,0,0.0003
+GAIR-RANSAC first-order,gair-ransac,first_order,True,misclassification,0.6,4.0,2.4,0,0.0003
+GAIR-RANSAC first-order,gair-ransac,first_order,True,misclassification,0.6,4.5,2.6999999999999997,0,0.0002
+GAIR-RANSAC radial,gair-ransac,radial,True,misclassification,0.6,0.0,0.001,0,1.0
+GAIR-RANSAC radial,gair-ransac,radial,True,misclassification,0.6,0.5,0.3,0,0.3577
+GAIR-RANSAC radial,gair-ransac,radial,True,misclassification,0.6,1.0,0.6,0,0.048
+GAIR-RANSAC radial,gair-ransac,radial,True,misclassification,0.6,1.5,0.8999999999999999,0,0.0189
+GAIR-RANSAC radial,gair-ransac,radial,True,misclassification,0.6,2.0,1.2,0,0.0015
+GAIR-RANSAC radial,gair-ransac,radial,True,misclassification,0.6,2.5,1.5,0,0.0006
+GAIR-RANSAC radial,gair-ransac,radial,True,misclassification,0.6,3.0,1.7999999999999998,0,0.0006
+GAIR-RANSAC radial,gair-ransac,radial,True,misclassification,0.6,3.5,2.1,0,0.0003
+GAIR-RANSAC radial,gair-ransac,radial,True,misclassification,0.6,4.0,2.4,0,0.0004
+GAIR-RANSAC radial,gair-ransac,radial,True,misclassification,0.6,4.5,2.6999999999999997,0,0.0005
+RANSAC chamfer,ransac,first_order,True,chamfer,0.6,0.0,0.001,0,1.2641158904465928
+RANSAC chamfer,ransac,first_order,True,chamfer,0.6,0.5,0.3,0,6.955838505645412
+RANSAC chamfer,ransac,first_order,True,chamfer,0.6,1.0,0.6,0,1.742397529240791
+RANSAC chamfer,ransac,first_order,True,chamfer,0.6,1.5,0.8999999999999999,0,1.5678072245800896
+RANSAC chamfer,ransac,first_order,True,chamfer,0.6,2.0,1.2,0,1.630926366855787
+RANSAC chamfer,ransac,first_order,True,chamfer,0.6,2.5,1.5,0,1.7680319842987877
+RANSAC chamfer,ransac,first_order,True,chamfer,0.6,3.0,1.7999999999999998,0,2.021268246209586
+RANSAC chamfer,ransac,first_order,True,chamfer,0.6,3.5,2.1,0,2.043997117401714
+RANSAC chamfer,ransac,first_order,True,chamfer,0.6,4.0,2.4,0,1.5782103956806834
+RANSAC chamfer,ransac,first_order,True,chamfer,0.6,4.5,2.6999999999999997,0,1.5712452401486654
+GAIR-RANSAC first-order chamfer,gair-ransac,first_order,True,chamfer,0.6,0.0,0.001,0,nan
+GAIR-RANSAC first-order chamfer,gair-ransac,first_order,True,chamfer,0.6,0.5,0.3,0,8.6527990986062
+GAIR-RANSAC first-order chamfer,gair-ransac,first_order,True,chamfer,0.6,1.0,0.6,0,1.5435911656790382
+GAIR-RANSAC first-order chamfer,gair-ransac,first_order,True,chamfer,0.6,1.5,0.8999999999999999,0,1.9122968052792304
+GAIR-RANSAC first-order chamfer,gair-ransac,first_order,True,chamfer,0.6,2.0,1.2,0,1.9683935350092554
+GAIR-RANSAC first-order chamfer,gair-ransac,first_order,True,chamfer,0.6,2.5,1.5,0,2.0371314202899424
+GAIR-RANSAC first-order chamfer,gair-ransac,first_order,True,chamfer,0.6,3.0,1.7999999999999998,0,2.103517711776371
+GAIR-RANSAC first-order chamfer,gair-ransac,first_order,True,chamfer,0.6,3.5,2.1,0,2.302789816159765
+GAIR-RANSAC first-order chamfer,gair-ransac,first_order,True,chamfer,0.6,4.0,2.4,0,1.5592985372186643
+GAIR-RANSAC first-order chamfer,gair-ransac,first_order,True,chamfer,0.6,4.5,2.6999999999999997,0,1.289141550363257
+GAIR-RANSAC radial chamfer,gair-ransac,radial,True,chamfer,0.6,0.0,0.001,0,nan
+GAIR-RANSAC radial chamfer,gair-ransac,radial,True,chamfer,0.6,0.5,0.3,0,7.821257188500573
+GAIR-RANSAC radial chamfer,gair-ransac,radial,True,chamfer,0.6,1.0,0.6,0,1.052996701696327
+GAIR-RANSAC radial chamfer,gair-ransac,radial,True,chamfer,0.6,1.5,0.8999999999999999,0,0.9429167482446492
+GAIR-RANSAC radial chamfer,gair-ransac,radial,True,chamfer,0.6,2.0,1.2,0,0.8887309333630091
+GAIR-RANSAC radial chamfer,gair-ransac,radial,True,chamfer,0.6,2.5,1.5,0,0.7964286910767784
+GAIR-RANSAC radial chamfer,gair-ransac,radial,True,chamfer,0.6,3.0,1.7999999999999998,0,0.8114816781600587
+GAIR-RANSAC radial chamfer,gair-ransac,radial,True,chamfer,0.6,3.5,2.1,0,0.7736348258925785
+GAIR-RANSAC radial chamfer,gair-ransac,radial,True,chamfer,0.6,4.0,2.4,0,0.7418462925358177
+GAIR-RANSAC radial chamfer,gair-ransac,radial,True,chamfer,0.6,4.5,2.6999999999999997,0,0.7097793658424323
+RANSAC hausdorff,ransac,first_order,True,hausdorff,0.6,0.0,0.001,0,2.4263073678231284
+RANSAC hausdorff,ransac,first_order,True,hausdorff,0.6,0.5,0.3,0,5.887766484699743
+RANSAC hausdorff,ransac,first_order,True,hausdorff,0.6,1.0,0.6,0,6.291560995679948
+RANSAC hausdorff,ransac,first_order,True,hausdorff,0.6,1.5,0.8999999999999999,0,12.645540575512083
+RANSAC hausdorff,ransac,first_order,True,hausdorff,0.6,2.0,1.2,0,3.2501835905731764
+RANSAC hausdorff,ransac,first_order,True,hausdorff,0.6,2.5,1.5,0,12.43457232790953
+RANSAC hausdorff,ransac,first_order,True,hausdorff,0.6,3.0,1.7999999999999998,0,3.4551994922315665
+RANSAC hausdorff,ransac,first_order,True,hausdorff,0.6,3.5,2.1,0,13.099675464398414
+RANSAC hausdorff,ransac,first_order,True,hausdorff,0.6,4.0,2.4,0,13.845576838061243
+RANSAC hausdorff,ransac,first_order,True,hausdorff,0.6,4.5,2.6999999999999997,0,3.4910832152114053
+GAIR-RANSAC first-order hausdorff,gair-ransac,first_order,True,hausdorff,0.6,0.0,0.001,0,nan
+GAIR-RANSAC first-order hausdorff,gair-ransac,first_order,True,hausdorff,0.6,0.5,0.3,0,8.64697319641683
+GAIR-RANSAC first-order hausdorff,gair-ransac,first_order,True,hausdorff,0.6,1.0,0.6,0,4.252757828609861
+GAIR-RANSAC first-order hausdorff,gair-ransac,first_order,True,hausdorff,0.6,1.5,0.8999999999999999,0,3.602669617684262
+GAIR-RANSAC first-order hausdorff,gair-ransac,first_order,True,hausdorff,0.6,2.0,1.2,0,13.465397085823868
+GAIR-RANSAC first-order hausdorff,gair-ransac,first_order,True,hausdorff,0.6,2.5,1.5,0,3.615545143701709
+GAIR-RANSAC first-order hausdorff,gair-ransac,first_order,True,hausdorff,0.6,3.0,1.7999999999999998,0,4.02528985118064
+GAIR-RANSAC first-order hausdorff,gair-ransac,first_order,True,hausdorff,0.6,3.5,2.1,0,12.2807846931425
+GAIR-RANSAC first-order hausdorff,gair-ransac,first_order,True,hausdorff,0.6,4.0,2.4,0,12.916722225519749
+GAIR-RANSAC first-order hausdorff,gair-ransac,first_order,True,hausdorff,0.6,4.5,2.6999999999999997,0,12.296594410258704
+GAIR-RANSAC radial hausdorff,gair-ransac,radial,True,hausdorff,0.6,0.0,0.001,0,nan
+GAIR-RANSAC radial hausdorff,gair-ransac,radial,True,hausdorff,0.6,0.5,0.3,0,4.644919292507176
+GAIR-RANSAC radial hausdorff,gair-ransac,radial,True,hausdorff,0.6,1.0,0.6,0,4.104580061448407
+GAIR-RANSAC radial hausdorff,gair-ransac,radial,True,hausdorff,0.6,1.5,0.8999999999999999,0,3.003798268915459
+GAIR-RANSAC radial hausdorff,gair-ransac,radial,True,hausdorff,0.6,2.0,1.2,0,2.3992249662160843
+GAIR-RANSAC radial hausdorff,gair-ransac,radial,True,hausdorff,0.6,2.5,1.5,0,2.9862523216401664
+GAIR-RANSAC radial hausdorff,gair-ransac,radial,True,hausdorff,0.6,3.0,1.7999999999999998,0,3.208111723222183
+GAIR-RANSAC radial hausdorff,gair-ransac,radial,True,hausdorff,0.6,3.5,2.1,0,3.170014095365321
+GAIR-RANSAC radial hausdorff,gair-ransac,radial,True,hausdorff,0.6,4.0,2.4,0,2.8353991694443113
+GAIR-RANSAC radial hausdorff,gair-ransac,radial,True,hausdorff,0.6,4.5,2.6999999999999997,0,2.5119382422394394

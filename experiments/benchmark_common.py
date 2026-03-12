@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -17,6 +18,29 @@ from src.superquadrics.superquadric_param import SuperQuadricParams
 
 TEST_MODEL = SuperQuadricParams(9.0, 9.0, 9.0, 3.5, 2.09, [2.0, 2.0, 1.0], [5.0, 5.0, 5.0])
 TEST_MESH = supmesh.superquadric_mesh(TEST_MODEL)
+_gt_pts_list, _ = samp.sampling_sq_noisy([TEST_MESH], n_points=2000, noise_std=0.0, normal_noise_std=0.0, clip_k=3.0, seed=42)
+_GT_POINTS = np.vstack(_gt_pts_list).astype(np.float32)
+
+
+def _compute_metric(classifier: str, predicted_inliers: np.ndarray, gt_inliers: np.ndarray, fitted_model) -> float:
+    if classifier == "misclassification":
+        return float(np.mean(predicted_inliers != gt_inliers))
+    if fitted_model is None:
+        return float("nan")
+    try:
+        est_mesh = supmesh.superquadric_mesh(fitted_model)
+        est_pts_list, _ = samp.sampling_sq_noisy([est_mesh], n_points=2000, noise_std=0.0, normal_noise_std=0.0, clip_k=3.0, seed=0)
+        est_pts = np.vstack(est_pts_list).astype(np.float32)
+    except Exception:
+        return float("nan")
+    d_est_to_gt, _ = cKDTree(_GT_POINTS).query(est_pts)
+    d_gt_to_est, _ = cKDTree(est_pts).query(_GT_POINTS)
+    if classifier == "chamfer":
+        return float(np.mean(d_est_to_gt) + np.mean(d_gt_to_est))
+    if classifier == "hausdorff":
+        return float(max(np.max(d_est_to_gt), np.max(d_gt_to_est)))
+    raise ValueError(f"Unknown classifier: {classifier}")
+
 
 
 def build_sweep_values(values: list[float] | None, start: float, stop: float, step: float, step_name: str, start_name: str, stop_name: str) -> list[float]:
@@ -46,8 +70,8 @@ def build_test_cloud(noise_std: float, n_surface_points: int, n_outliers: int, s
     return points, normals, gt_inliers
 
 
-def run_trial(job: tuple[str, str, str, bool, float, int, int, int, int, float | None, float | None, float, int, int]) -> dict[str, float | str | bool]:
-    label, algorithm, error_metric, use_normal_coherence, noise_std, run_idx, base_seed, n_surface_points, n_outliers, threshold_value, threshold_scale, graph_radius, max_iterations, inner_iterations = job
+def run_trial(job: tuple) -> dict[str, float | str | bool]:
+    label, algorithm, error_metric, use_normal_coherence, classifier, noise_std, run_idx, base_seed, n_surface_points, n_outliers, threshold_value, threshold_scale, graph_radius, max_iterations, inner_iterations = job
     seed = base_seed + run_idx + int(round(noise_std * 10_000))
     points, normals, gt_inliers = build_test_cloud(noise_std, n_surface_points, n_outliers, seed)
     if threshold_value is None:
@@ -58,6 +82,7 @@ def run_trial(job: tuple[str, str, str, bool, float, int, int, int, int, float |
         threshold = float(threshold_value)
 
     predicted_inliers = np.zeros(points.shape[0], dtype=bool)
+    fitted_model = None
     if algorithm == "ransac":
         result = inner_ransac(
             point_cloud=points,
@@ -70,8 +95,9 @@ def run_trial(job: tuple[str, str, str, bool, float, int, int, int, int, float |
         )
         if result.best_inlier_count > 0 and result.best_inliers_mask.size == points.shape[0]:
             predicted_inliers = np.asarray(result.best_inliers_mask, dtype=bool)
+            fitted_model = result.best_model
     else:
-        _, inlier_masks = gair_ransac(
+        models, inlier_masks = gair_ransac(
             point_cloud=points,
             normals=normals,
             threshold=threshold,
@@ -85,24 +111,26 @@ def run_trial(job: tuple[str, str, str, bool, float, int, int, int, int, float |
         )
         if inlier_masks:
             predicted_inliers = np.asarray(inlier_masks[0], dtype=bool)
+            fitted_model = models[0] if models else None
 
     return {
         "curve": label,
         "algorithm": algorithm,
         "error_metric": error_metric,
         "use_normal_coherence": use_normal_coherence,
+        "classifier": classifier,
         "noise_std": noise_std,
         "threshold_scale": threshold_scale,
         "threshold": threshold,
         "run_idx": run_idx,
-        "misclassification_error": float(np.mean(predicted_inliers != gt_inliers)),
+        "metric_value": _compute_metric(classifier, predicted_inliers, gt_inliers, fitted_model),
     }
 
 
 def run_benchmark(
     title: str,
     output_dir: Path,
-    curves: list[tuple[str, str, str, bool]],
+    curves: list[tuple[str, str, str, bool, str]],
     noise_values: list[float] | None,
     noise_start: float,
     noise_stop: float,
@@ -132,6 +160,7 @@ def run_benchmark(
             algorithm,
             error_metric,
             use_normal_coherence,
+            classifier,
             noise_std,
             run_idx,
             base_seed,
@@ -143,7 +172,7 @@ def run_benchmark(
             max_iterations,
             inner_iterations,
         )
-        for label, algorithm, error_metric, use_normal_coherence in curves
+        for label, algorithm, error_metric, use_normal_coherence, classifier in curves
         for noise_std in noise_grid
         for run_idx in range(runs)
     ]
@@ -154,18 +183,24 @@ def run_benchmark(
     else:
         raw_rows = [run_trial(job) for job in jobs]
 
+    # group curves by classifier so each metric gets its own plot
+    classifiers_order: list[str] = []
+    for _, _, _, _, cls in curves:
+        if cls not in classifiers_order:
+            classifiers_order.append(cls)
+
     summary: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-    for label, _, _, _ in curves:
+    for label, _, _, _, _ in curves:
         means: list[float] = []
         stds: list[float] = []
         for noise_std in noise_grid:
-            errors = [
-                float(row["misclassification_error"])
+            values = [
+                float(row["metric_value"])
                 for row in raw_rows
                 if row["curve"] == label and row["noise_std"] == noise_std
             ]
-            means.append(float(np.mean(errors)))
-            stds.append(float(np.std(errors)))
+            means.append(float(np.mean(values)))
+            stds.append(float(np.std(values)))
         summary[label] = (
             np.asarray(noise_grid, dtype=np.float64),
             np.asarray(means, dtype=np.float64),
@@ -176,37 +211,43 @@ def run_benchmark(
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["curve", "algorithm", "error_metric", "use_normal_coherence", "noise_std", "threshold_scale", "threshold", "run_idx", "misclassification_error"],
+            fieldnames=["curve", "algorithm", "error_metric", "use_normal_coherence", "classifier", "noise_std", "threshold_scale", "threshold", "run_idx", "metric_value"],
         )
         writer.writeheader()
         writer.writerows(raw_rows)
 
-    plot_path = output_dir / "noise_vs_misclassification.png"
-    plt.figure(figsize=(9, 5))
-    for label, (curve_noise, mean, std) in summary.items():
-        plt.plot(curve_noise, mean, marker="o", linewidth=2, label=label)
-        plt.fill_between(curve_noise, mean - std, mean + std, alpha=0.15)
-    plt.xlabel("noise_std")
-    plt.ylabel("misclassification error")
-    plt.title(title)
-    plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(plot_path, dpi=200)
-    plt.close()
+    plot_paths = []
+    for cls in classifiers_order:
+        cls_curves = [(label, c) for label, _, _, _, c in curves if c == cls]
+        plot_path = output_dir / f"noise_vs_{cls}.png"
+        plt.figure(figsize=(9, 5))
+        for label, _ in cls_curves:
+            curve_noise, mean, std = summary[label]
+            plt.plot(curve_noise, mean, marker="o", linewidth=2, label=label)
+            plt.fill_between(curve_noise, mean - std, mean + std, alpha=0.15)
+        plt.xlabel("noise_std")
+        plt.ylabel(cls)
+        plt.title(f"{title} [{cls}]")
+        plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(plot_path, dpi=200)
+        plt.close()
+        plot_paths.append(plot_path)
 
     for label, (curve_noise, mean, _) in summary.items():
-        pairs = ", ".join(f"{noise:.2f}:{err:.4f}" for noise, err in zip(curve_noise, mean))
+        pairs = ", ".join(f"{noise:.2f}:{val:.4f}" for noise, val in zip(curve_noise, mean))
         print(f"{label} -> {pairs}")
     print(f"Saved raw results to {csv_path}")
-    print(f"Saved plot to {plot_path}")
+    for p in plot_paths:
+        print(f"Saved plot to {p}")
     return 0
 
 
 def run_scale_factor_benchmark(
     title: str,
     output_dir: Path,
-    curves: list[tuple[str, str, str, bool]],
+    curves: list[tuple[str, str, str, bool, str]],
     fixed_noise_std: float,
     scale_values: list[float] | None,
     scale_start: float,
@@ -235,6 +276,7 @@ def run_scale_factor_benchmark(
             algorithm,
             error_metric,
             use_normal_coherence,
+            classifier,
             fixed_noise_std,
             run_idx,
             base_seed,
@@ -246,7 +288,7 @@ def run_scale_factor_benchmark(
             max_iterations,
             inner_iterations,
         )
-        for label, algorithm, error_metric, use_normal_coherence in curves
+        for label, algorithm, error_metric, use_normal_coherence, classifier in curves
         for scale_factor in scale_grid
         for run_idx in range(runs)
     ]
@@ -257,18 +299,23 @@ def run_scale_factor_benchmark(
     else:
         raw_rows = [run_trial(job) for job in jobs]
 
+    classifiers_order: list[str] = []
+    for _, _, _, _, cls in curves:
+        if cls not in classifiers_order:
+            classifiers_order.append(cls)
+
     summary: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-    for label, _, _, _ in curves:
+    for label, _, _, _, _ in curves:
         means: list[float] = []
         stds: list[float] = []
         for scale_factor in scale_grid:
-            errors = [
-                float(row["misclassification_error"])
+            values = [
+                float(row["metric_value"])
                 for row in raw_rows
                 if row["curve"] == label and row["threshold_scale"] == scale_factor
             ]
-            means.append(float(np.mean(errors)))
-            stds.append(float(np.std(errors)))
+            means.append(float(np.mean(values)))
+            stds.append(float(np.std(values)))
         summary[label] = (
             np.asarray(scale_grid, dtype=np.float64),
             np.asarray(means, dtype=np.float64),
@@ -279,28 +326,34 @@ def run_scale_factor_benchmark(
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["curve", "algorithm", "error_metric", "use_normal_coherence", "noise_std", "threshold_scale", "threshold", "run_idx", "misclassification_error"],
+            fieldnames=["curve", "algorithm", "error_metric", "use_normal_coherence", "classifier", "noise_std", "threshold_scale", "threshold", "run_idx", "metric_value"],
         )
         writer.writeheader()
         writer.writerows(raw_rows)
 
-    plot_path = output_dir / "scale_factor_vs_misclassification.png"
-    plt.figure(figsize=(9, 5))
-    for label, (curve_scale, mean, std) in summary.items():
-        plt.plot(curve_scale, mean, marker="o", linewidth=2, label=label)
-        plt.fill_between(curve_scale, mean - std, mean + std, alpha=0.15)
-    plt.xlabel("threshold scale factor")
-    plt.ylabel("misclassification error")
-    plt.title(title)
-    plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(plot_path, dpi=200)
-    plt.close()
+    plot_paths = []
+    for cls in classifiers_order:
+        cls_curves = [(label, c) for label, _, _, _, c in curves if c == cls]
+        plot_path = output_dir / f"scale_factor_vs_{cls}.png"
+        plt.figure(figsize=(9, 5))
+        for label, _ in cls_curves:
+            curve_scale, mean, std = summary[label]
+            plt.plot(curve_scale, mean, marker="o", linewidth=2, label=label)
+            plt.fill_between(curve_scale, mean - std, mean + std, alpha=0.15)
+        plt.xlabel("threshold scale factor")
+        plt.ylabel(cls)
+        plt.title(f"{title} [{cls}]")
+        plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(plot_path, dpi=200)
+        plt.close()
+        plot_paths.append(plot_path)
 
     for label, (curve_scale, mean, _) in summary.items():
-        pairs = ", ".join(f"{scale:.2f}:{err:.4f}" for scale, err in zip(curve_scale, mean))
+        pairs = ", ".join(f"{scale:.2f}:{val:.4f}" for scale, val in zip(curve_scale, mean))
         print(f"{label} -> {pairs}")
     print(f"Saved raw results to {csv_path}")
-    print(f"Saved plot to {plot_path}")
+    for p in plot_paths:
+        print(f"Saved plot to {p}")
     return 0
