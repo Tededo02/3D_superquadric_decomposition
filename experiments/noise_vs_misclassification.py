@@ -19,7 +19,7 @@ NOISE_STOP = 2.0
 NOISE_STEP = 0.1
 RUNS = 1
 N_SURFACE_POINTS = 10000
-N_OUTLIERS = 0
+N_OUTLIERS = 1000
 THRESHOLD = 3.0 
 GRAPH_RADIUS = 0.06  # Relative to the bounding box diagonal.
 MAX_ITERATIONS = 10
@@ -29,10 +29,18 @@ USE_MULTIPROCESSING = True
 BASE_SEED = 42
 OUTPUT_DIR = Path("artifacts") / "noise_vs_misclassification"
 CURVES = [
-    ("RANSAC", "ransac", "first_order", True),
-#    ("GAIR-RANSAC radial", "gair-ransac", "radial", True),
-    ("GAIR-RANSAC first-order", "gair-ransac", "first_order", True),
-#    ("GAIR-RANSAC mixed", "gair-ransac", "mix", True),
+    # misclassification
+    ("RANSAC", "ransac", "first_order", True, "misclassification"),
+    ("GAIR-RANSAC first-order", "gair-ransac", "first_order", True, "misclassification"),
+    ("GAIR-RANSAC radial", "gair-ransac", "radial", True, "misclassification"),
+    # chamfer distance
+    ("RANSAC chamfer", "ransac", "first_order", True, "chamfer"),
+    ("GAIR-RANSAC first-order chamfer", "gair-ransac", "first_order", True, "chamfer"),
+    ("GAIR-RANSAC radial chamfer", "gair-ransac", "radial", True, "chamfer"),
+    # hausdorff distance
+    ("RANSAC hausdorff", "ransac", "first_order", True, "hausdorff"),
+    ("GAIR-RANSAC first-order hausdorff", "gair-ransac", "first_order", True, "hausdorff"),
+    ("GAIR-RANSAC radial hausdorff", "gair-ransac", "radial", True, "hausdorff"),
 ]
 
 
