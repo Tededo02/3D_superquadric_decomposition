@@ -57,17 +57,27 @@ def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
 
 # Fit a superquadric to points using non-linear least squares with loss soft_l1.
 # Initialization is based on PCA and robust bounding-box estimates.
-def fit_superquadric_ls(points: np.ndarray, error_metric: str = "mix") -> SuperQuadricParams:
-    if points.shape[0]<11:
-        raise ValueError ("too few points for a stable superqadric fit")
+def fit_superquadric_ls(
+    points: np.ndarray,
+    error_metric: str = "mix",
+    bounds_reference_points: np.ndarray | None = None,
+) -> SuperQuadricParams:
+    fit_points = np.asarray(points, dtype=np.float64)
+    if fit_points.shape[0] < 11:
+        raise ValueError("too few points for a stable superqadric fit")
     theta0: SuperQuadricParams
-    theta0 = pca_initialization(points)
+    theta0 = pca_initialization(fit_points)
+    bounds_points = fit_points if bounds_reference_points is None else np.asarray(bounds_reference_points, dtype=np.float64)
+    if bounds_points.shape[0] == 0:
+        raise ValueError("bounds_reference_points must contain at least one point")
     # bounds for stability
-    mins = points.min(axis=0)
-    maxs = points.max(axis=0)
+    mins = bounds_points.min(axis=0)
+    maxs = bounds_points.max(axis=0)
     diag = float(np.linalg.norm(maxs - mins) + 1e-12)
-    a_min = 1e-1 * diag
-    a_max = 1.5 * diag
+    a_min = max(1e-3, 5e-2 * diag)
+    # MSS samples are local by design, so allow the fit to grow well beyond
+    # the patch extent and reach the full object scale during refinement.
+    a_max = max(1e-2, 2.5 * diag)
     e_min, e_max = 0.08,4.0
     ang_min, ang_max = -np.pi, np.pi
     t_margin = 0.25 * diag
@@ -92,7 +102,7 @@ def fit_superquadric_ls(points: np.ndarray, error_metric: str = "mix") -> SuperQ
             metric=error_metric,
         ),
         x0=theta0p,
-        args=(points,),
+        args=(fit_points,),
         method="trf",
         bounds=(lower, upper),
         loss="soft_l1",
@@ -117,6 +127,7 @@ def inner_ransac(
     actual_set_index: int,
     threshold: float,
     error_metric: str = "mix",
+    consensus_metric: str | None = None,
     n_iters: int = 50,
     random_seed: int | None = None,
 ) -> InnerRansacResult:
@@ -128,6 +139,8 @@ def inner_ransac(
     best_model: Optional[SuperQuadricParams] = None
     best_inliers: np.ndarray = np.empty((0,), dtype=bool)
     best_count: int = -1
+    if consensus_metric is None:
+        consensus_metric = error_metric
     #sampling from gair set
     size_sample=min(np.size(refined_set_index),sample_size)
     for _ in range(n_iters):
@@ -135,10 +148,14 @@ def inner_ransac(
         points=point_cloud[sample_idx]
         # model estimation via pca
         try:
-            model = fit_superquadric_ls(points, error_metric=error_metric)
+            model = fit_superquadric_ls(
+                points,
+                error_metric=error_metric,
+                bounds_reference_points=point_cloud[refined_set_index],
+            )
         except Exception:
             continue
-        inlier_set_index = compute_consensus(model, point_cloud[actual_set_index], threshold, error_metric=error_metric)
+        inlier_set_index = compute_consensus(model, point_cloud[actual_set_index], threshold, error_metric=consensus_metric)
         count = int(np.count_nonzero(inlier_set_index))
         if count > best_count:
             best_count = count
@@ -153,8 +170,12 @@ def inner_ransac(
     inlier_points = actual_points[best_inliers]
     if inlier_points.shape[0] >= 11:
         try:
-            refit_model = fit_superquadric_ls(inlier_points, error_metric=error_metric)
-            refit_inlier_set_index = compute_consensus(refit_model, actual_points, threshold, error_metric=error_metric)
+            refit_model = fit_superquadric_ls(
+                inlier_points,
+                error_metric=error_metric,
+                bounds_reference_points=inlier_points,
+            )
+            refit_inlier_set_index = compute_consensus(refit_model, actual_points, threshold, error_metric=consensus_metric)
             refit_count = int(np.count_nonzero(refit_inlier_set_index))
             if refit_count >= best_count:
                 best_model = refit_model

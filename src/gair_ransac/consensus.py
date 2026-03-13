@@ -3,8 +3,8 @@ from src.superquadrics.superquadric_param import SuperQuadricParams
 from src.superquadrics.superquadric_residual import superquadric_residual_vector
 
 
-def distance_err(model: SuperQuadricParams, points: np.ndarray, error_metric: str = "mix") -> np.ndarray:
-    d = superquadric_residual_vector(model, points, metric=error_metric)
+def distance_err(model: SuperQuadricParams, points: np.ndarray, error_metric: str = "first_order") -> np.ndarray:
+    d = superquadric_residual_vector(model, points, metric="radial"if error_metric == "first_order" else error_metric)
     return np.abs(d)
 
 

@@ -1,6 +1,6 @@
 import numpy as np
 import pyvista as pv
-from scipy.spatial import KDTree
+from scipy.spatial import KDTree, cKDTree
 
 
 # Constants
@@ -11,11 +11,319 @@ _CLOSED_FORM_SIZES = {
 }
 
 # How many points the algorithm picks for each patch
-_PTS_PER_PATCH = 2
+_PTS_PER_PATCH = 3
 
 # Voxel side = median NN-spacing × this factor (spatial_walk_mss only).
 # Really important, you can choose how big the single voxel cell is
-_VOXEL_SPACING_FACTOR = 15
+_VOXEL_SPACING_FACTOR = 40
+
+
+def _farthest_point_indices(
+    points: np.ndarray,
+    sample_size: int,
+    rng: np.random.Generator,
+    start_idx: int | None = None,
+) -> np.ndarray:
+    n_points = int(points.shape[0])
+    if n_points <= sample_size:
+        return np.arange(n_points, dtype=int)
+
+    if start_idx is None:
+        start_idx = int(rng.integers(n_points))
+
+    selected = np.empty(sample_size, dtype=int)
+    selected[0] = int(start_idx)
+
+    diff = points - points[selected[0]]
+    min_d2 = np.einsum("ij,ij->i", diff, diff)
+    min_d2[selected[0]] = -1.0
+
+    for i in range(1, sample_size):
+        next_idx = int(np.argmax(min_d2))
+        selected[i] = next_idx
+        diff = points - points[next_idx]
+        d2 = np.einsum("ij,ij->i", diff, diff)
+        min_d2 = np.minimum(min_d2, d2)
+        min_d2[selected[: i + 1]] = -1.0
+
+    return selected
+
+
+def _coherent_local_pool_indices(
+    points: np.ndarray,
+    tree: cKDTree,
+    seed_idx: int,
+    target_pool_size: int,
+    initial_k: int,
+    normals: np.ndarray | None,
+    normal_cos_min: float,
+    tangent_cos_max: float,
+) -> np.ndarray:
+    n_points = int(points.shape[0])
+    seed_point = points[seed_idx]
+    query_k = min(max(initial_k, target_pool_size), n_points)
+
+    if normals is None:
+        _, idx = tree.query(seed_point, k=query_k)
+        idx = np.atleast_1d(idx).astype(np.int64, copy=False)
+        return idx[:target_pool_size]
+
+    seed_normal = normals[seed_idx]
+    relax_normal = [normal_cos_min, normal_cos_min - 0.2, normal_cos_min - 0.4, -1.0]
+    relax_tangent = [tangent_cos_max, tangent_cos_max + 0.1, tangent_cos_max + 0.2, 1.0]
+
+    for normal_thr, tangent_thr in zip(relax_normal, relax_tangent):
+        current_k = query_k
+        while True:
+            _, idx = tree.query(seed_point, k=current_k)
+            idx = np.atleast_1d(idx).astype(np.int64, copy=False)
+
+            other_idx = idx[idx != seed_idx]
+            if other_idx.size == 0:
+                filtered = np.array([seed_idx], dtype=np.int64)
+            else:
+                disp = points[other_idx] - seed_point
+                dist = np.linalg.norm(disp, axis=1)
+                disp_unit = np.zeros_like(disp)
+                valid = dist > 1e-12
+                disp_unit[valid] = disp[valid] / dist[valid, None]
+
+                normal_align = normals[other_idx] @ seed_normal
+                tangent_align = np.abs(disp_unit @ seed_normal)
+                keep = (normal_align >= normal_thr) & (tangent_align <= tangent_thr)
+                filtered = np.concatenate(([seed_idx], other_idx[keep]))
+
+            if filtered.size >= target_pool_size or current_k >= n_points:
+                return filtered[:target_pool_size]
+            current_k = min(current_k * 2, n_points)
+
+    _, idx = tree.query(seed_point, k=min(n_points, target_pool_size))
+    idx = np.atleast_1d(idx).astype(np.int64, copy=False)
+    return idx[:target_pool_size]
+
+
+def _local_sample_score(
+    points: np.ndarray,
+    normals: np.ndarray | None,
+    sample_idx: np.ndarray,
+    seed_idx: int,
+    base_scale: float,
+) -> float:
+    seed_point = points[seed_idx]
+    radial_dist = np.linalg.norm(points[sample_idx] - seed_point, axis=1)
+    compactness = float(np.mean(radial_dist) / (base_scale + 1e-12))
+
+    if normals is None:
+        return compactness
+
+    seed_normal = normals[seed_idx]
+    normal_align = np.clip(normals[sample_idx] @ seed_normal, -1.0, 1.0)
+    coherence_penalty = float(1.0 - normal_align.mean())
+    return compactness + 0.75 * coherence_penalty
+
+
+def component_knn_fps_mss(
+    D: np.ndarray,
+    normals: np.ndarray | None = None,
+    primitive_type: str = "superquadric",
+    sample_size: int = 30,
+    k_neighbors: int = 12,
+    normal_cos_min: float | None = 0.0,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """
+    Build a pure MSS from one k-NN connected component and spread it with FPS.
+
+    This sampler is meant for multi-model scenes: it avoids the global random
+    padding used by ``spatial_walk_mss`` when the local region is exhausted,
+    which is what tends to mix points from different superquadrics.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    N = len(D)
+
+    if primitive_type in _CLOSED_FORM_SIZES:
+        k = _CLOSED_FORM_SIZES[primitive_type]
+        return D[rng.choice(N, size=min(k, N), replace=False)]
+
+    if N <= sample_size:
+        return D.copy()
+
+    data = np.asarray(D)
+    points = np.asarray(D, dtype=np.float64)
+
+    use_normals = normals is not None and normal_cos_min is not None
+    if use_normals:
+        normals = np.asarray(normals, dtype=np.float64)
+        if normals.shape != points.shape:
+            raise ValueError(f"normals must have shape {points.shape}, got {normals.shape}")
+
+    tree = cKDTree(points)
+    k_query = min(max(k_neighbors + 1, 2), N)
+    _, knn_idx = tree.query(points, k=k_query)
+    knn_idx = np.asarray(knn_idx, dtype=np.int64)
+
+    adjacency: list[list[int]] = [[] for _ in range(N)]
+    for i in range(N):
+        for j in knn_idx[i, 1:]:
+            j = int(j)
+            if j == i:
+                continue
+            if use_normals and float(np.dot(normals[i], normals[j])) < float(normal_cos_min):
+                continue
+            adjacency[i].append(j)
+            adjacency[j].append(i)
+
+    degrees = np.fromiter((len(nbrs) for nbrs in adjacency), dtype=np.int64, count=N)
+    valid_seeds = np.flatnonzero(degrees > 0)
+    if valid_seeds.size == 0:
+        chosen = rng.choice(N, size=sample_size, replace=False)
+        return data[np.asarray(chosen, dtype=int)]
+
+    seed = int(valid_seeds[int(rng.integers(valid_seeds.size))])
+    visited = np.zeros(N, dtype=bool)
+    visited[seed] = True
+    stack = [seed]
+    component: list[int] = []
+
+    while stack:
+        node = stack.pop()
+        component.append(node)
+        nbrs = adjacency[node]
+        if not nbrs:
+            continue
+        nbrs_arr = np.asarray(nbrs, dtype=np.int64)
+        unvisited = nbrs_arr[~visited[nbrs_arr]]
+        if unvisited.size == 0:
+            continue
+        for idx in unvisited[rng.permutation(unvisited.size)]:
+            visited[idx] = True
+            stack.append(int(idx))
+
+    component_idx = np.asarray(component, dtype=np.int64)
+    if component_idx.size < sample_size:
+        return data[component_idx]
+
+    component_points = points[component_idx]
+    seed_local_idx = int(np.flatnonzero(component_idx == seed)[0])
+    fps_idx = _farthest_point_indices(
+        component_points,
+        sample_size=sample_size,
+        rng=rng,
+        start_idx=seed_local_idx,
+    )
+    return data[component_idx[fps_idx]]
+
+
+def adaptive_local_fps_mss(
+    D: np.ndarray,
+    normals: np.ndarray | None = None,
+    primitive_type: str = "superquadric",
+    sample_size: int = 30,
+    seed_tries: int = 10,
+    candidate_multiplier: float = 4.0,
+    initial_k: int = 96,
+    normal_cos_min: float = 0.35,
+    tangent_cos_max: float = 0.55,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """
+    Robust local MSS for detached, touching, and mildly overlapping shapes.
+
+    Strategy:
+    1. draw several random seeds
+    2. gather a compact local k-NN pool around each seed
+    3. filter neighbors using normal coherence and tangent compatibility
+    4. spread the final MSS inside that pool with farthest-point sampling
+
+    The sampler is local by construction, so unlike component-wide growth it
+    does not cross an entire connected structure when two superquadrics touch.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    N = len(D)
+
+    if primitive_type in _CLOSED_FORM_SIZES:
+        k = _CLOSED_FORM_SIZES[primitive_type]
+        return D[rng.choice(N, size=min(k, N), replace=False)]
+
+    if N <= sample_size:
+        return D.copy()
+
+    data = np.asarray(D)
+    points = np.asarray(D, dtype=np.float64)
+
+    normals_arr: np.ndarray | None = None
+    if normals is not None:
+        normals_arr = np.asarray(normals, dtype=np.float64)
+        if normals_arr.shape != points.shape:
+            raise ValueError(f"normals must have shape {points.shape}, got {normals_arr.shape}")
+        normals_arr = normals_arr / (np.linalg.norm(normals_arr, axis=1, keepdims=True) + 1e-12)
+
+    tree = cKDTree(points)
+    nn_dists, _ = tree.query(points, k=min(2, N))
+    nn_dists = np.asarray(nn_dists, dtype=np.float64)
+    if nn_dists.ndim == 1:
+        base_scale = float(np.median(nn_dists))
+    else:
+        base_scale = float(np.median(nn_dists[:, -1]))
+    base_scale = max(base_scale, 1e-9)
+
+    target_pool_size = min(N, max(sample_size, int(round(candidate_multiplier * sample_size))))
+    query_k = min(N, max(initial_k, target_pool_size))
+
+    best_score = np.inf
+    best_sample_idx: np.ndarray | None = None
+    n_trials = max(int(seed_tries), 1)
+
+    for _ in range(n_trials):
+        seed_idx = int(rng.integers(N))
+        pool_idx = _coherent_local_pool_indices(
+            points=points,
+            tree=tree,
+            seed_idx=seed_idx,
+            target_pool_size=target_pool_size,
+            initial_k=query_k,
+            normals=normals_arr,
+            normal_cos_min=normal_cos_min,
+            tangent_cos_max=tangent_cos_max,
+        )
+
+        if pool_idx.size < sample_size:
+            _, fallback_idx = tree.query(points[seed_idx], k=sample_size)
+            pool_idx = np.atleast_1d(fallback_idx).astype(np.int64, copy=False)
+
+        if pool_idx.size > target_pool_size:
+            pool_idx = pool_idx[:target_pool_size]
+
+        local_points = points[pool_idx]
+        seed_pos = np.flatnonzero(pool_idx == seed_idx)
+        start_idx = int(seed_pos[0]) if seed_pos.size > 0 else 0
+        chosen_local = _farthest_point_indices(
+            local_points,
+            sample_size=sample_size,
+            rng=rng,
+            start_idx=start_idx,
+        )
+        sample_idx = pool_idx[chosen_local]
+        score = _local_sample_score(
+            points=points,
+            normals=normals_arr,
+            sample_idx=sample_idx,
+            seed_idx=seed_idx,
+            base_scale=base_scale,
+        )
+        if score < best_score:
+            best_score = score
+            best_sample_idx = sample_idx
+
+    if best_sample_idx is None:
+        chosen = rng.choice(N, size=sample_size, replace=False)
+        best_sample_idx = np.asarray(chosen, dtype=np.int64)
+
+    return data[best_sample_idx]
 
 
 # Both functions return M_j
