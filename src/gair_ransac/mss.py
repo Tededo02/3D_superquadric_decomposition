@@ -17,7 +17,7 @@ _PTS_PER_PATCH = 3
 # Really important, you can choose how big the single voxel cell is
 _VOXEL_SPACING_FACTOR = 40
 
-
+# this function is used to spread the sample inside the local pool
 def _farthest_point_indices(
     points: np.ndarray,
     sample_size: int,
@@ -48,7 +48,8 @@ def _farthest_point_indices(
 
     return selected
 
-
+# This function gathers a local pool of candidate points around a seed,
+#  using both spatial proximity and normal coherence.
 def _coherent_local_pool_indices(
     points: np.ndarray,
     tree: cKDTree,
@@ -101,7 +102,14 @@ def _coherent_local_pool_indices(
     idx = np.atleast_1d(idx).astype(np.int64, copy=False)
     return idx[:target_pool_size]
 
-
+# This function scores a local sample based on compactness and normal coherence.
+# Lower is better. The compactness term encourages the sample to be spatially tight,
+# while the coherence penalty encourages normals to be aligned with the seed normal.
+# this is the formula to score: score = (mean distance to seed) / base_scale + 0.75 * (1 - mean normal alignment)
+# The base_scale is typically the median nearest neighbor distance in the whole point cloud, which normalizes the compactness term to be scale-invariant.
+# The normal alignment is the cosine of the angle between the sample normals and the seed normal, averaged over the sample. A value of 1 means perfect alignment,
+# while 0 means orthogonal and -1 means opposite direction. The coherence penalty is then 1 minus this average alignment, 
+# so it ranges from 0 (perfectly coherent) to 2 (completely incoherent).
 def _local_sample_score(
     points: np.ndarray,
     normals: np.ndarray | None,
@@ -121,101 +129,7 @@ def _local_sample_score(
     coherence_penalty = float(1.0 - normal_align.mean())
     return compactness + 0.75 * coherence_penalty
 
-
-def component_knn_fps_mss(
-    D: np.ndarray,
-    normals: np.ndarray | None = None,
-    primitive_type: str = "superquadric",
-    sample_size: int = 30,
-    k_neighbors: int = 12,
-    normal_cos_min: float | None = 0.0,
-    rng: np.random.Generator | None = None,
-) -> np.ndarray:
-    """
-    Build a pure MSS from one k-NN connected component and spread it with FPS.
-
-    This sampler is meant for multi-model scenes: it avoids the global random
-    padding used by ``spatial_walk_mss`` when the local region is exhausted,
-    which is what tends to mix points from different superquadrics.
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-
-    N = len(D)
-
-    if primitive_type in _CLOSED_FORM_SIZES:
-        k = _CLOSED_FORM_SIZES[primitive_type]
-        return D[rng.choice(N, size=min(k, N), replace=False)]
-
-    if N <= sample_size:
-        return D.copy()
-
-    data = np.asarray(D)
-    points = np.asarray(D, dtype=np.float64)
-
-    use_normals = normals is not None and normal_cos_min is not None
-    if use_normals:
-        normals = np.asarray(normals, dtype=np.float64)
-        if normals.shape != points.shape:
-            raise ValueError(f"normals must have shape {points.shape}, got {normals.shape}")
-
-    tree = cKDTree(points)
-    k_query = min(max(k_neighbors + 1, 2), N)
-    _, knn_idx = tree.query(points, k=k_query)
-    knn_idx = np.asarray(knn_idx, dtype=np.int64)
-
-    adjacency: list[list[int]] = [[] for _ in range(N)]
-    for i in range(N):
-        for j in knn_idx[i, 1:]:
-            j = int(j)
-            if j == i:
-                continue
-            if use_normals and float(np.dot(normals[i], normals[j])) < float(normal_cos_min):
-                continue
-            adjacency[i].append(j)
-            adjacency[j].append(i)
-
-    degrees = np.fromiter((len(nbrs) for nbrs in adjacency), dtype=np.int64, count=N)
-    valid_seeds = np.flatnonzero(degrees > 0)
-    if valid_seeds.size == 0:
-        chosen = rng.choice(N, size=sample_size, replace=False)
-        return data[np.asarray(chosen, dtype=int)]
-
-    seed = int(valid_seeds[int(rng.integers(valid_seeds.size))])
-    visited = np.zeros(N, dtype=bool)
-    visited[seed] = True
-    stack = [seed]
-    component: list[int] = []
-
-    while stack:
-        node = stack.pop()
-        component.append(node)
-        nbrs = adjacency[node]
-        if not nbrs:
-            continue
-        nbrs_arr = np.asarray(nbrs, dtype=np.int64)
-        unvisited = nbrs_arr[~visited[nbrs_arr]]
-        if unvisited.size == 0:
-            continue
-        for idx in unvisited[rng.permutation(unvisited.size)]:
-            visited[idx] = True
-            stack.append(int(idx))
-
-    component_idx = np.asarray(component, dtype=np.int64)
-    if component_idx.size < sample_size:
-        return data[component_idx]
-
-    component_points = points[component_idx]
-    seed_local_idx = int(np.flatnonzero(component_idx == seed)[0])
-    fps_idx = _farthest_point_indices(
-        component_points,
-        sample_size=sample_size,
-        rng=rng,
-        start_idx=seed_local_idx,
-    )
-    return data[component_idx[fps_idx]]
-
-
+# Main function: adaptive local MSS with farthest-point sampling
 def adaptive_local_fps_mss(
     D: np.ndarray,
     normals: np.ndarray | None = None,
