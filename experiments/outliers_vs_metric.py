@@ -15,7 +15,7 @@ if BLAS_THREADS_PER_WORKER is not None:
 from benchmark_common import run_outlier_hypotheses_benchmark
 
 # Edit these variables
-Y_METRIC = "chamfer"  # "misclassification" or "chamfer"
+Y_METRICS = ["misclassification", "chamfer"]
 FIXED_NOISE_STD = 0.2
 THRESHOLD = 3.0 * FIXED_NOISE_STD
 OUTLIER_VALUES = None  # If None, defaults to range(OUTLIER_START, OUTLIER_STOP + 1, OUTLIER_STEP)
@@ -25,24 +25,17 @@ OUTLIER_STEP = 500
 RUNS = 1
 N_SURFACE_POINTS = 10000
 GRAPH_RADIUS = 0.06  # Relative to the bounding box diagonal.
-GAIR_INNER_ITERATIONS = 50 # inner-ransac will compute 150 iteration for worst case scenario
-MAX_WORKERS = 4 # None uses all available CPU cores.
+GAIR_INNER_ITERATIONS = 50
+MAX_WORKERS = 4  # None uses all available CPU cores.
 USE_MULTIPROCESSING = True
 BASE_SEED = 42
-HYPOTHESIS_VALUES = [150,450,1000]
+HYPOTHESIS_VALUES = [150, 450, 1000]
 
-if Y_METRIC not in {"misclassification", "chamfer"}:
-    raise ValueError("Y_METRIC must be 'misclassification' or 'chamfer'")
-
-OUTPUT_DIR = Path("artifacts") / f"outliers_vs_{Y_METRIC}_hypotheses"
-
-# We choose the current best-looking GAIR setup and compare it to vanilla RANSAC.
-CURVES = [
-    (f"RANSAC m={m}", "ransac", "first_order", True, Y_METRIC, m)
-    for m in HYPOTHESIS_VALUES
-] + [
-    (f"GAIR-RANSAC m={3}(inner={GAIR_INNER_ITERATIONS})", "gair-ransac", "first_order", True, Y_METRIC, 5)
-]
+if not Y_METRICS:
+    raise ValueError("Y_METRICS must contain at least one metric")
+invalid_metrics = [metric for metric in Y_METRICS if metric not in {"misclassification", "chamfer"}]
+if invalid_metrics:
+    raise ValueError("Y_METRICS entries must be 'misclassification' or 'chamfer'")
 
 
 def _metric_title(metric_name: str) -> str:
@@ -54,25 +47,37 @@ def _metric_title(metric_name: str) -> str:
 
 
 def main() -> int:
-    return run_outlier_hypotheses_benchmark(
-        title=f"Outliers vs {_metric_title(Y_METRIC)} - noise_std = {FIXED_NOISE_STD}, threshold = {THRESHOLD}",
-        output_dir=OUTPUT_DIR,
-        curves=CURVES,
-        fixed_noise_std=FIXED_NOISE_STD,
-        outlier_values=OUTLIER_VALUES,
-        outlier_start=OUTLIER_START,
-        outlier_stop=OUTLIER_STOP,
-        outlier_step=OUTLIER_STEP,
-        runs=RUNS,
-        n_surface_points=N_SURFACE_POINTS,
-        threshold_value=THRESHOLD,
-        threshold_scale=None,
-        graph_radius=GRAPH_RADIUS,
-        gair_inner_iterations=GAIR_INNER_ITERATIONS,
-        max_workers=MAX_WORKERS,
-        use_multiprocessing=USE_MULTIPROCESSING,
-        base_seed=BASE_SEED,
-    )
+    for metric in Y_METRICS:
+        output_dir = Path("artifacts") / f"outliers_vs_{metric}"
+        curves = [
+            (f"RANSAC m={m}", "ransac", "first_order", True, metric, m)
+            for m in HYPOTHESIS_VALUES
+        ] + [
+            (f"GAIR-RANSAC m={5}(inner={GAIR_INNER_ITERATIONS})", "gair-ransac", "first_order", True, metric, 5)
+        ]
+        result = run_outlier_hypotheses_benchmark(
+            title=f"Outliers vs {_metric_title(metric)} - noise_std = {FIXED_NOISE_STD}, threshold = {THRESHOLD}",
+            output_dir=output_dir,
+            curves=curves,
+            fixed_noise_std=FIXED_NOISE_STD,
+            outlier_values=OUTLIER_VALUES,
+            outlier_start=OUTLIER_START,
+            outlier_stop=OUTLIER_STOP,
+            outlier_step=OUTLIER_STEP,
+            runs=RUNS,
+            n_surface_points=N_SURFACE_POINTS,
+            threshold_value=THRESHOLD,
+            threshold_scale=None,
+            graph_radius=GRAPH_RADIUS,
+            gair_inner_iterations=GAIR_INNER_ITERATIONS,
+            max_workers=MAX_WORKERS,
+            use_multiprocessing=USE_MULTIPROCESSING,
+            base_seed=BASE_SEED,
+        )
+        if result != 0:
+            return result
+    return 0
+
 
 
 if __name__ == "__main__":

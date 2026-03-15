@@ -217,3 +217,7 @@ pyproject.toml
 
 experiments/artifacts/*
 artifacts/*
+
+.gitignore
+.vscode
+.DS_Store
