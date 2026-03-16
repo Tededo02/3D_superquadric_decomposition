@@ -10,8 +10,8 @@ def sampling_sq(mesh_list: list[Trimesh], n_points: int = 1000) -> tuple[list[np
     points_list: list[np.ndarray] = []
     normals_list: list[np.ndarray] = []
     for mesh in mesh_list:
-        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points) # pts are type numpy array of shape (n_points,3) and coordinates are type float32
-        normals = mesh.face_normals[face_idx].astype(np.float32, copy=False)
+        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points) # pts are type numpy array of shape (n_points,3) and coordinates are type float64
+        normals = mesh.face_normals[face_idx].astype(np.float64, copy=False)
         points_list.append(pts)
         normals_list.append(normals)
     return points_list, normals_list
@@ -20,8 +20,8 @@ def sampling_sq_random(mesh_list: list[Trimesh], n_points: int = 1000, seed: int
     points_list: list[np.ndarray] = []
     normals_list: list[np.ndarray] = []
     for mesh in mesh_list:
-        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points, seed=seed) # pts are type numpy array of shape (n_points,3) and coordinates are type float32
-        normals = mesh.face_normals[face_idx].astype(np.float32, copy=False)
+        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points, seed=seed) # pts are type numpy array of shape (n_points,3) and coordinates are type float64
+        normals = mesh.face_normals[face_idx].astype(np.float64, copy=False)
         points_list.append(pts)
         normals_list.append(normals)
     return points_list, normals_list
@@ -37,11 +37,11 @@ def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: f
     for mesh in mesh_list:
         # sample points on surface + get which face each point came from
         pts, face_idx = trimesh.sample.sample_surface(mesh, n_points)  # pts: (N,3), face_idx: (N,)
-        pts = pts.astype(np.float32, copy=False)
+        pts = pts.astype(np.float64, copy=False)
         # get the corresponding face normals (one normal per sampled point)
-        normals = mesh.face_normals[face_idx].astype(np.float32, copy=False)  # (N,3), already unit-length
+        normals = mesh.face_normals[face_idx].astype(np.float64, copy=False)  # (N,3), already unit-length
         # daw 1D Gaussian noise amplitudes (one scalar per point)
-        alpha = rng.normal(loc=0.0, scale=noise_std, size=(n_points, 1)).astype(np.float32)  # (N,1)
+        alpha = rng.normal(loc=0.0, scale=noise_std, size=(n_points, 1)).astype(np.float64)  # (N,1)
         # clip to avoid rare large jumps
         if clip_k is not None:
             alpha = np.clip(alpha, -clip_k * noise_std, clip_k * noise_std)
@@ -49,12 +49,12 @@ def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: f
         pts_noisy = pts + normals * alpha  # (N,3)
         # perturb normals with additive Gaussian noise centered on the exact direction
         if normal_noise_std > 0.0:
-            normal_delta = rng.normal(loc=0.0, scale=normal_noise_std, size=normals.shape).astype(np.float32)
+            normal_delta = rng.normal(loc=0.0, scale=normal_noise_std, size=normals.shape).astype(np.float64)
             if clip_k is not None:
                 normal_delta = np.clip(normal_delta, -clip_k * normal_noise_std, clip_k * normal_noise_std)
             normals_noisy = normals + normal_delta
             normals_noisy /= np.linalg.norm(normals_noisy, axis=1, keepdims=True) + 1e-12
-            normals_noisy = normals_noisy.astype(np.float32, copy=False)
+            normals_noisy = normals_noisy.astype(np.float64, copy=False)
         else:
             normals_noisy = normals
 
@@ -74,12 +74,12 @@ def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: flo
     seed: int | None = None,
 ) ->tuple[ np.ndarray[np.ndarray], np.ndarray[np.ndarray]]:
     if n_out <= 0:
-        return np.empty((0, 3), dtype=np.float32), np.empty((0, 3), dtype=np.float32)
+        return np.empty((0, 3), dtype=np.float64), np.empty((0, 3), dtype=np.float64)
 
     rng = np.random.default_rng(seed)
 
-    mins = np.min([m.bounds[0] for m in meshes], axis=0).astype(np.float32)
-    maxs = np.max([m.bounds[1] for m in meshes], axis=0).astype(np.float32)
+    mins = np.min([m.bounds[0] for m in meshes], axis=0).astype(np.float64)
+    maxs = np.max([m.bounds[1] for m in meshes], axis=0).astype(np.float64)
 
     diag = np.linalg.norm(maxs - mins)
     pad = margin * diag
@@ -89,12 +89,12 @@ def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: flo
     mode = mode.lower()
 
     #generate n_out normals for the outliers randomly oriented in the 3D space
-    outlier_normals = rng.normal(size=(n_out, 3)).astype(np.float32)
+    outlier_normals = rng.normal(size=(n_out, 3)).astype(np.float64)
     outlier_normals /= np.linalg.norm(outlier_normals, axis=1, keepdims=True) + 1e-12  # normalize to unit length
 
     if mode == "uniform":
         pts = rng.uniform(low=low, high=high, size=(n_out, 3))
-        return pts.astype(np.float32),outlier_normals
+        return pts.astype(np.float64),outlier_normals
 
     if mode == "mog":
         if n_clusters <= 0:
@@ -114,9 +114,8 @@ def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: flo
 
         # clip to bbox so points always stay inside
         pts = np.clip(pts, low, high)
-        return pts.astype(np.float32),outlier_normals
+        return pts.astype(np.float64),outlier_normals
 
     raise ValueError(f"Unknown mode '{mode}'. Use: 'uniform', 'mog'.")
-
 
 

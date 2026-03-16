@@ -28,7 +28,7 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bound
     # --- punti (se presenti) ---
     n_points_total = 0
     if pts is not None:
-        points = np.asarray(pts, dtype=np.float32).reshape(-1, 3) # -1 because numpy can infer the number of points, 3 for XYZ
+        points = np.asarray(pts, dtype=np.float64).reshape(-1, 3) # -1 because numpy can infer the number of points, 3 for XYZ
         n_points_total = points.shape[0] # total number of points across all meshes
         mask_is_valid = inlier_mask is not None and len(inlier_mask) == n_points_total
         if mask_is_valid:

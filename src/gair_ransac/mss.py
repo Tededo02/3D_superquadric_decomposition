@@ -1,7 +1,6 @@
 import numpy as np
-import pyvista as pv
 from scipy.spatial import KDTree, cKDTree
-
+import pyvista as pv
 
 # Constants
 _CLOSED_FORM_SIZES = {
@@ -50,13 +49,7 @@ def _farthest_point_indices(
 
 # This function gathers a local pool of candidate points around a seed,
 #  using both spatial proximity and normal coherence.
-def _coherent_local_pool_indices(
-    points: np.ndarray,
-    tree: cKDTree,
-    seed_idx: int,
-    target_pool_size: int,
-    initial_k: int,
-    normals: np.ndarray | None,
+def _coherent_local_pool_indices(points: np.ndarray,tree: cKDTree,seed_idx: int,target_pool_size: int,initial_k: int,normals: np.ndarray | None,
     normal_cos_min: float,
     tangent_cos_max: float,
 ) -> np.ndarray:
@@ -177,8 +170,11 @@ def adaptive_local_fps_mss(
         normals_arr = normals_arr / (np.linalg.norm(normals_arr, axis=1, keepdims=True) + 1e-12)
 
     tree = cKDTree(points)
+    # 1 is self, 2 is nearest neighbor, so we take the second column for the median NN distance
     nn_dists, _ = tree.query(points, k=min(2, N))
     nn_dists = np.asarray(nn_dists, dtype=np.float64)
+    # The base scale is the median nearest neighbor distance, which normalizes the compactness term in the score to be scale-invariant.
+    #using the median is more robust to outliers than the mean.
     if nn_dists.ndim == 1:
         base_scale = float(np.median(nn_dists))
     else:
@@ -394,7 +390,7 @@ def visualize_mss(D: np.ndarray, Mj: np.ndarray) -> None:
 
     if (~mss_mask).any():
         pl.add_points(
-            D[~mss_mask].astype(np.float32),
+            D[~mss_mask].astype(np.float64),
             render_points_as_spheres=True,
             point_size=point_size,
             color="red",
@@ -403,7 +399,7 @@ def visualize_mss(D: np.ndarray, Mj: np.ndarray) -> None:
 
     if mss_mask.any():
         pl.add_points(
-            D[mss_mask].astype(np.float32),
+            D[mss_mask].astype(np.float64),
             render_points_as_spheres=True,
             point_size=point_size,
             color="green",

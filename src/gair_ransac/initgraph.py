@@ -18,7 +18,6 @@ def build_radius_graph(
     points: np.ndarray,
     m_neighbors: int = 12,
     radius: float = 0.06,
-    radius_is_relative: bool = True,
 ) -> tuple[list[list[int]], np.ndarray]:
     points = np.asarray(points, dtype=np.float64)
     if points.ndim != 2:
