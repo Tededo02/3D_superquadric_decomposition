@@ -18,6 +18,7 @@ def build_radius_graph(
     points: np.ndarray,
     m_neighbors: int = 12,
     radius: float = 0.06,
+    radius_is_relative: bool = True,
 ) -> tuple[list[list[int]], np.ndarray]:
     points = np.asarray(points, dtype=np.float64)
     if points.ndim != 2:
@@ -26,9 +27,12 @@ def build_radius_graph(
     n_points = int(points.shape[0])
     if n_points == 0:
         return [], np.empty((0, 2), dtype=np.int64)
-    # The paper sets the graph radius as a function of the point-cloud spatial extension.
-    extent = point_cloud_spatial_extent(points)
-    effective_radius = float(radius) * extent
+    if radius_is_relative:
+        # The paper sets the graph radius as a function of the point-cloud spatial extension.
+        extent = point_cloud_spatial_extent(points)
+        effective_radius = float(radius) * extent
+    else:
+        effective_radius = float(radius)
     tree = cKDTree(points)
     # query_ball_point also returns the point itself, which we remove below.
     neigh_lists = tree.query_ball_point(points, r=effective_radius)

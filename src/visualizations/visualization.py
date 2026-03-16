@@ -1,7 +1,7 @@
 import pyvista as pv
 import numpy as np
 
-def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bounds=True,colors: np.ndarray = None, inlier_mask: np.ndarray = None):
+def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bounds=True,colors: np.ndarray = None, inlier_mask: np.ndarray = None,mss_used: np.ndarray = None) -> None:
 
     # --- plotter ---
     pl = pv.Plotter()
@@ -39,7 +39,10 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bound
                 pl.add_points(points[~mask], render_points_as_spheres=True, point_size=point_size, color="red", opacity=0.4)
         else:
             pl.add_points(points, render_points_as_spheres=True, point_size=point_size)
-
+        if mss_used is not None:
+            mss_points = np.asarray(mss_used, dtype=np.float64).reshape(-1, 3)
+            pl.add_points(mss_points, render_points_as_spheres=True, point_size=point_size*5, color="violet")
+        
 
     # Assi + griglia “in scena”
     pl.show_axes()            # triade assi in basso (widget)
@@ -81,6 +84,8 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bound
 
     if pts is not None:
         info.append(f"Sample points: {n_points_total}")
+    if mss_used is not None:
+        info.append(f"MSS points shown: {len(np.asarray(mss_used).reshape(-1, 3))}")
 
     pl.add_text("\n".join(info), position="upper_left", font_size=10)
 

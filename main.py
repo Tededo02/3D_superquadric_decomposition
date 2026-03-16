@@ -17,9 +17,10 @@ def create_and_estimate_supq():
     # lightblue = ground truth, lightgreen = estimated
     # add/remove rows here to change the scene
     gt_params = [
-        #SuperQuadricParams(9.0, 9.0, 9.0, 1.1, 0.7, [2.0, 2.0, 1.0], [5.0, 5.0, 5.0]),
-        SuperQuadricParams(3.0, 3.0, 3.0, 3.5, 2.9, [2.0, 2.0, 1.0], [-5.0, -5.0, -5.0]),
-        SuperQuadricParams(2.5, 2.5, 2.5, 2.1, 3.1, [2.1, 1.9, 0.8], [-10.5, -5.0, -5.0]),
+    SuperQuadricParams(9.0, 9.0, 9.0, 3.5, 2.09, [2.0, 2.0, 1.0], [5.0, 5.0, 5.0]),
+    SuperQuadricParams(3.0, 3.0, 3.0, 0.5, 0.9, [2.0, 2.0, 1.0], [-5.0, -5.0, -5.0]),
+    SuperQuadricParams(4.0, 4.0, 4.0, 0.8, 1.1, [1.7, 2.1, 0.9], [13.0, 5.0, 5.0]),
+    SuperQuadricParams(2.5, 2.5, 2.5, 0.7, 1.2, [2.1, 1.9, 0.8], [-10.5, -5.0, -5.0])
     ]
 
     list_mesh = [supmesh.superquadric_mesh(p) for p in gt_params]
@@ -35,6 +36,7 @@ def create_and_estimate_supq():
     
     
     algorithm="gair-ransac"
+    total_best_mss_used = None
     #------choose here which kind of points to use for fitting the superquadric------
     sampled_points = np.vstack([*sampled_points_noisy, sampled_points_outliers]).astype(np.float32, copy=False)
     normals = np.vstack([*normals_sp_noisy, normals_sp_outliers]).astype(np.float32, copy=False)
@@ -64,7 +66,7 @@ def create_and_estimate_supq():
     elif algorithm == "gair-ransac":
         # Radius is expressed as a fraction of the point cloud bounding-box diagonal.
         graph_radius = 0.08
-        models, inliers_masks = gair_ransac(sampled_points, normals, threshold=THRESHOLD, max_models=len(list_mesh),max_iterations=10,inner_iterations=40, radius=graph_radius)
+        models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=THRESHOLD, max_models=len(list_mesh),max_iterations=10,inner_iterations=40, radius=graph_radius)
         if not models:
             raise RuntimeError("gair_ransac did not return any model")
         for model in models:
@@ -115,7 +117,15 @@ def create_and_estimate_supq():
         n_inliers = inlier_mask.sum()
         n_outliers = len(inlier_mask) - n_inliers
         print(f"Inliers: {n_inliers} | Outliers: {n_outliers} | Total: {len(inlier_mask)} | Outlier ratio: {n_outliers/len(inlier_mask):.2%}")
-    vis.show_mesh_and_points(list_mesh, pts=sampled_points, point_size=5, show_bounds=True, colors=colors, inlier_mask=inlier_mask)
+    vis.show_mesh_and_points(
+        list_mesh,
+        pts=sampled_points,
+        point_size=5,
+        show_bounds=True,
+        colors=colors,
+        inlier_mask=inlier_mask,
+        mss_used=total_best_mss_used if algorithm == "gair-ransac" else None,
+    )
 
 def main(argv: list[str] | None = None) -> int:
     if argv is None:

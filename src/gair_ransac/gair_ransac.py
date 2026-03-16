@@ -19,7 +19,9 @@ def compare_consensus(prev_mask: np.ndarray, new_mask: np.ndarray, min_gain: int
     return int(new_mask.sum()) >= int(prev_mask.sum()) + min_gain
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "mix", consensus_metric: str = "radial", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
+def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
+    total_best_mss_used: FloatArray | None = None
+
     # Convert inputs to standard float arrays
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     normals: FloatArray = np.asarray(normals, dtype=np.float64)
@@ -49,6 +51,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
         use_full_cloud_hypothesis = False
         n_hypotheses = 1 if use_full_cloud_hypothesis else max_iterations
         # Main RANSAC loop over m hypotheses-------------EXTERNAL RANSAC----------------
+        best_mss_used: FloatArray | None = None
         for j in range(n_hypotheses):
             # Draw a non-minimal sample set and estimate a candidate model
             if use_full_cloud_hypothesis:
@@ -144,7 +147,8 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             if current_count > int(np.count_nonzero(best_inliers)):
                 best_model = current_model
                 best_inliers = current_inliers
-
+                best_mss_used = M_j.copy()
+        
         # Stop if no valid model was found
         if best_model is None:
             break
@@ -184,9 +188,15 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
         # Save the extracted model and its global inlier mask
         models_set.append(best_model)
         inliers_set.append(global_inliers)
+        if best_mss_used is not None:
+            total_best_mss_used = (
+                best_mss_used
+                if total_best_mss_used is None
+                else np.vstack((total_best_mss_used, best_mss_used))
+            )
 
         # Remove the inliers of the extracted model from the residual set and all the points too close to it
         remove_mask = expanded_removal_mask(best_model, current_point_cloud, threshold, factor=1.3, error_metric=consensus_metric)
         remaining_indices = remaining_indices[~remove_mask]
         # Return all extracted models and their global inlier masks
-    return models_set, inliers_set
+    return models_set, inliers_set, total_best_mss_used
