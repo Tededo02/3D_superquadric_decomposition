@@ -122,17 +122,21 @@ def fit_superquadric_ls(
 
 
 def inner_ransac(
-    point_cloud: np.ndarray[np.ndarray],
-    refined_set_index: int,
-    actual_set_index: int,
+    point_cloud: np.ndarray,
+    refined_set_index: np.ndarray,
+    actual_set_index: np.ndarray | None,
     threshold: float,
     error_metric: str = "mix",
     consensus_metric: str | None = None,
     n_iters: int = 50,
     random_seed: int | None = None,
 ) -> InnerRansacResult:
-    points:np.ndarray
-    sample_size:int = 30 # minimum number of points to fit a superquadric (11 parameters)
+    point_cloud = np.asarray(point_cloud, dtype=np.float64)
+    refined_set_index = np.asarray(refined_set_index, dtype=np.int64)
+    actual_points = point_cloud if actual_set_index is None else point_cloud[np.asarray(actual_set_index, dtype=np.int64)]
+    bounds_reference_points = point_cloud[refined_set_index]
+    points: np.ndarray
+    sample_size: int = 30 # minimum number of points to fit a superquadric (11 parameters)
     result: InnerRansacResult
     rng = np.random.default_rng(random_seed)
     model: SuperQuadricParams
@@ -144,18 +148,18 @@ def inner_ransac(
     #sampling from gair set
     size_sample=min(np.size(refined_set_index),sample_size)
     for _ in range(n_iters):
-        sample_idx = rng.choice(refined_set_index,size=size_sample,replace=False)
-        points=point_cloud[sample_idx]
+        sample_idx = rng.choice(refined_set_index, size=size_sample, replace=False)
+        points = point_cloud[sample_idx]
         # model estimation via pca
         try:
             model = fit_superquadric_ls(
                 points,
                 error_metric=error_metric,
-                bounds_reference_points=point_cloud[refined_set_index],
+                bounds_reference_points=bounds_reference_points,
             )
         except Exception:
             continue
-        inlier_set_index = compute_consensus(model, point_cloud[actual_set_index], threshold, error_metric=consensus_metric)
+        inlier_set_index = compute_consensus(model, actual_points, threshold, error_metric=consensus_metric)
         count = int(np.count_nonzero(inlier_set_index))
         if count > best_count:
             best_count = count
@@ -166,7 +170,6 @@ def inner_ransac(
     if best_count < 0 or best_model is None:
         return InnerRansacResult(best_model=SuperQuadricParams(1,1,1,1,1,[0,0,0],[0,0,0]),best_inlier_count=0,best_inliers_mask=np.empty((0,), dtype=bool))
     # final refit using all inliers for better accuracy
-    actual_points = point_cloud[actual_set_index]
     inlier_points = actual_points[best_inliers]
     if inlier_points.shape[0] >= 11:
         try:

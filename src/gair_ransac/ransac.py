@@ -117,13 +117,12 @@ def ransac(
                         terminate = True
                         continue
 
-                    actual_set_index: IntArray = np.arange(current_point_cloud.shape[0], dtype=np.int64)
                     refined_set_index: IntArray = np.flatnonzero(refined_inliers).astype(np.int64)
 
                     inner_result: InnerRansacResult = inner_ransac(
                         current_point_cloud,
                         refined_set_index,
-                        actual_set_index,
+                        None,
                         threshold,
                         error_metric=error_metric,
                         consensus_metric=consensus_metric,
@@ -135,8 +134,7 @@ def ransac(
                         terminate = True
                         continue
 
-                    new_inliers_mask: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
-                    new_inliers_mask[actual_set_index[inner_result.best_inliers_mask]] = True
+                    new_inliers_mask: BoolArray = np.asarray(inner_result.best_inliers_mask, dtype=bool)
 
                     if compare_consensus(current_inliers, new_inliers_mask, min_gain=min_gain):
                         current_inliers = new_inliers_mask
@@ -146,14 +144,13 @@ def ransac(
                         terminate = True
             else:
                 # Simple inner RANSAC on candidate inliers, no graph
-                actual_set_index: IntArray = np.arange(current_point_cloud.shape[0], dtype=np.int64)
                 refined_set_index: IntArray = np.flatnonzero(candidate_inliers).astype(np.int64)
 
                 if refined_set_index.size >= min_inliers:
                     inner_result: InnerRansacResult = inner_ransac(
                         current_point_cloud,
                         refined_set_index,
-                        actual_set_index,
+                        None,
                         threshold,
                         error_metric=error_metric,
                         consensus_metric=consensus_metric,
@@ -162,8 +159,7 @@ def ransac(
                     )
 
                     if inner_result.best_inlier_count > 0:
-                        new_inliers_mask: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
-                        new_inliers_mask[actual_set_index[inner_result.best_inliers_mask]] = True
+                        new_inliers_mask: BoolArray = np.asarray(inner_result.best_inliers_mask, dtype=bool)
                         current_inliers = new_inliers_mask
                         current_count = int(np.count_nonzero(new_inliers_mask))
                         current_model = inner_result.best_model

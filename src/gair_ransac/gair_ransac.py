@@ -98,13 +98,12 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     continue
                 # Sample from the refined set, but validate on the whole residual cloud
                 # so the model can grow from a local patch to the full object support.
-                actual_set_index: IntArray = np.arange(current_point_cloud.shape[0], dtype=np.int64)
                 refined_set_index: IntArray = np.flatnonzero(refined_inliers).astype(np.int64)
                 # Run inner RANSAC: sample from I_hat and evaluate over the current residual.
                 inner_result: InnerRansacResult = inner_ransac(
                     current_point_cloud,
                     refined_set_index,
-                    actual_set_index,
+                    None,
                     threshold,
                     error_metric=error_metric,
                     consensus_metric=consensus_metric,
@@ -121,8 +120,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 # It does not work well. The paper does not use c_hat, but with c_hat
                 # the update is much more stable in this implementation.
                 # from here
-                new_inliers_mask_c_hat: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
-                new_inliers_mask_c_hat[actual_set_index[inner_result.best_inliers_mask]] = True
+                new_inliers_mask_c_hat: BoolArray = np.asarray(inner_result.best_inliers_mask, dtype=bool)
 
                 if compare_consensus(current_inliers, new_inliers_mask_c_hat, min_gain=min_gain):
                     current_inliers = new_inliers_mask_c_hat

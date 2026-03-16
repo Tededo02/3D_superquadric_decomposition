@@ -28,18 +28,19 @@ def create_and_estimate_supq():
 
     #----those functions return a set of sample and their normals-----------
     #sampled_points,normals = samp.sampling_sq(list_mesh, n_points=1000)
-    sampled_points_noisy,normals_sp_noisy = samp.sampling_sq_noisy(list_mesh, n_points=30000, noise_std=NOISE_STD, clip_k=3.0, seed=42)#list 
-    sampled_points_random, normals_sp_random = samp.sampling_sq_random(list_mesh, n_points=4000, seed=42)
-    sampled_points_random = np.vstack(sampled_points_random).astype(np.float32, copy=False)
-    sampled_points_outliers,normals_sp_outliers = samp.sampling_outliers(list_mesh, n_out=1, margin=0.10, mode="uniform", seed=42) #array 2D (N_out, 3)
+    sampled_points_noisy, normals_sp_noisy = samp.sampling_sq_noisy(list_mesh, n_points=30000, noise_std=NOISE_STD, clip_k=3.0, seed=42)
+    sampled_points_random, _ = samp.sampling_sq_random(list_mesh, n_points=4000, seed=42)
+    sampled_points_random = np.vstack(sampled_points_random)
+    sampled_points_outliers, normals_sp_outliers = samp.sampling_outliers(list_mesh, n_out=1, margin=0.10, mode="uniform", seed=42)
     
     
     
     algorithm="gair-ransac"
     total_best_mss_used = None
     #------choose here which kind of points to use for fitting the superquadric------
-    sampled_points = np.vstack([*sampled_points_noisy, sampled_points_outliers]).astype(np.float32, copy=False)
-    normals = np.vstack([*normals_sp_noisy, normals_sp_outliers]).astype(np.float32, copy=False)
+    sampled_points = np.vstack([*sampled_points_noisy, sampled_points_outliers])
+    normals = np.vstack([*normals_sp_noisy, normals_sp_outliers])
+    del sampled_points_noisy, normals_sp_noisy, sampled_points_outliers, normals_sp_outliers
     n_gt = len(list_mesh)
     mesh_estimated = None
 
@@ -50,7 +51,7 @@ def create_and_estimate_supq():
         list_mesh.append(mesh_estimated)
         colors.append("lightgreen")
     elif algorithm == "inner-ransac":
-        theta0:InnerRansacResult = inner_ransac(sampled_points, refined_set_index=np.arange(sampled_points.shape[0]), actual_set_index=np.arange(sampled_points.shape[0]), threshold=THRESHOLD)
+        theta0:InnerRansacResult = inner_ransac(sampled_points, refined_set_index=np.arange(sampled_points.shape[0]), actual_set_index=None, threshold=THRESHOLD)
         mesh_estimated = supmesh.superquadric_mesh(theta0.best_model)
         list_mesh.append(mesh_estimated)
         colors.append("lightgreen")
@@ -78,7 +79,7 @@ def create_and_estimate_supq():
     # use chamfer distance(one side) on ground-truth= sampled points(noisy) and the points from our supq estimated
     estimated_meshes = list_mesh[n_gt:]
     sampled_estimated, _ = samp.sampling_sq_random(estimated_meshes, n_points=4000, seed=50)
-    sample_from_supq_estimated = np.vstack([np.asarray(s, dtype=np.float32) for s in sampled_estimated])
+    sample_from_supq_estimated = np.vstack(sampled_estimated)
     _, index_sample_to_estimate = k_nearest_neighbors(sampled_points, sample_from_supq_estimated, k=1)
     index_sample_to_estimate = np.asarray(index_sample_to_estimate).reshape(-1)
     # One-sided distance: for each ground-truth point, measure the distance to its nearest point on the estimated shape.
@@ -108,9 +109,17 @@ def create_and_estimate_supq():
     if algorithm == "inner-ransac":
         inlier_mask = theta0.best_inliers_mask
     elif algorithm == "ransac":
-        inlier_mask = np.any(np.stack(inliers_masks), axis=0) if inliers_masks else None
+        inlier_mask = None
+        if inliers_masks:
+            inlier_mask = inliers_masks[0].copy()
+            for mask in inliers_masks[1:]:
+                inlier_mask |= mask
     elif algorithm == "gair-ransac":
-        inlier_mask = np.any(np.stack(inliers_masks), axis=0) if inliers_masks else None
+        inlier_mask = None
+        if inliers_masks:
+            inlier_mask = inliers_masks[0].copy()
+            for mask in inliers_masks[1:]:
+                inlier_mask |= mask
     else:
         inlier_mask = None
     if inlier_mask is not None:

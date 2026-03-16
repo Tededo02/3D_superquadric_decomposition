@@ -27,27 +27,32 @@ def build_radius_graph(
     n_points = int(points.shape[0])
     if n_points == 0:
         return [], np.empty((0, 2), dtype=np.int64)
+    if m_neighbors <= 0:
+        return [[] for _ in range(n_points)], np.empty((0, 2), dtype=np.int64)
     if radius_is_relative:
         # The paper sets the graph radius as a function of the point-cloud spatial extension.
         extent = point_cloud_spatial_extent(points)
         effective_radius = float(radius) * extent
     else:
         effective_radius = float(radius)
+    if effective_radius <= 0.0:
+        return [[] for _ in range(n_points)], np.empty((0, 2), dtype=np.int64)
+
     tree = cKDTree(points)
-    # query_ball_point also returns the point itself, which we remove below.
-    neigh_lists = tree.query_ball_point(points, r=effective_radius)
+    max_query_k = min(n_points, int(m_neighbors) + 1)
+    dists, idxs = tree.query(points, k=max_query_k, distance_upper_bound=effective_radius)
+    dists = np.asarray(dists, dtype=np.float64).reshape(n_points, max_query_k)
+    idxs = np.asarray(idxs, dtype=np.int64).reshape(n_points, max_query_k)
 
     neighbors: list[list[int]] = []
     edges: list[tuple[int, int]] = []
-    for i, idxs in enumerate(neigh_lists):
-        # Keep at most the first m spatial neighbors inside the radius.
-        idxs = [j for j in idxs if j != i]
-        if len(idxs) > m_neighbors:
-            d2 = np.sum((points[idxs] - points[i]) ** 2, axis=1)
-            order = np.argsort(d2)[:m_neighbors]
-            idxs = [idxs[k] for k in order]
-        neighbors.append(idxs)
-        for j in idxs:
+    for i in range(n_points):
+        row_idx = idxs[i]
+        row_dist = dists[i]
+        valid = np.isfinite(row_dist) & (row_idx != i) & (row_idx < n_points)
+        row_neighbors = row_idx[valid].tolist()
+        neighbors.append(row_neighbors)
+        for j in row_neighbors:
             if j > i:
                 edges.append((i, j))
 
