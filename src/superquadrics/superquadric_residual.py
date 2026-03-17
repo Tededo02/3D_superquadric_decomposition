@@ -1,6 +1,39 @@
 import numpy as np
 from .superquadric_param import SuperQuadricParams
 
+# compute gradient
+def _superquadric_gradient_canonical_from_pc(
+    model: SuperQuadricParams,
+    pc: np.ndarray,
+    eps: float = 1e-12,
+) -> np.ndarray:
+    x = pc[:, 0]
+    y = pc[:, 1]
+    z = pc[:, 2]
+
+    a1, a2, a3 = model.a1, model.a2, model.a3
+    e1, e2 = model.e1, model.e2
+
+    p_xy = 2.0 / e2
+    p_z = 2.0 / e1
+    k = e2 / e1
+
+    ax = np.maximum(np.abs(x / a1), eps)
+    ay = np.maximum(np.abs(y / a2), eps)
+    az = np.maximum(np.abs(z / a3), eps)
+
+    u = ax ** p_xy + ay ** p_xy
+    u = np.maximum(u, eps)
+
+    du_dx = p_xy * (ax ** (p_xy - 1.0)) * (np.sign(x) / a1)
+    du_dy = p_xy * (ay ** (p_xy - 1.0)) * (np.sign(y) / a2)
+    dv_du = k * (u ** (k - 1.0))
+
+    dfdx = dv_du * du_dx
+    dfdy = dv_du * du_dy
+    dfdz = p_z * (az ** (p_z - 1.0)) * (np.sign(z) / a3)
+    return np.stack([dfdx, dfdy, dfdz], axis=1)
+
 # compute the implicit function value for each point
 # return an array of shape (N,) with the distance from each point to the superquadric surface
 # the distance is computed as the absolute value of the implicit function value, which is zero on the surface and positive outside, negative inside
@@ -19,7 +52,6 @@ def implicit_f_superquadric_residual(model: SuperQuadricParams, points: np.ndarr
 def superquadric_first_order_residual(model: SuperQuadricParams, points: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     R = model.rotation_matrix()
     pc = (points - model.t) @ R
-
     x = pc[:, 0]
     y = pc[:, 1]
     z = pc[:, 2]
@@ -43,22 +75,24 @@ def superquadric_first_order_residual(model: SuperQuadricParams, points: np.ndar
     w = az ** p_z
     f = v + w - 1.0
 
-    # du/dx, du/dy
-    du_dx = p_xy * (ax ** (p_xy - 1.0)) * (np.sign(x) / a1)
-    du_dy = p_xy * (ay ** (p_xy - 1.0)) * (np.sign(y) / a2)
-
-    # dv/du
-    dv_du = k * (u ** (k - 1.0))
-
-    dfdx = dv_du * du_dx
-    dfdy = dv_du * du_dy
-
-    # dw/dz
-    dfdz = p_z * (az ** (p_z - 1.0)) * (np.sign(z) / a3)
-
-    grad_norm = np.sqrt(dfdx * dfdx + dfdy * dfdy + dfdz * dfdz)
+    grad_canonical = _superquadric_gradient_canonical_from_pc(model, pc, eps)
+    grad_norm = np.linalg.norm(grad_canonical, axis=1)
     grad_norm = np.maximum(grad_norm, 1e-9)
     return f / grad_norm
+
+# return the normal vector of the superquadric at each point, computed as the normalized gradient of the implicit function
+def superquadric_normal_world(
+    model: SuperQuadricParams,
+    points: np.ndarray,
+    eps: float = 1e-12,
+) -> np.ndarray:
+    R = model.rotation_matrix()
+    pc = (points - model.t) @ R
+    grad_canonical = _superquadric_gradient_canonical_from_pc(model, pc, eps)
+    grad_world = grad_canonical @ R.T
+    grad_norm = np.linalg.norm(grad_world, axis=1, keepdims=True)
+    grad_norm = np.maximum(grad_norm, 1e-9)
+    return grad_world / grad_norm
 
 # computes the ray from the center of the superquadric to each point in space
 # then finds the respective point on the surface

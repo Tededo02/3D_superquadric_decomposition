@@ -10,7 +10,7 @@ from point_cloud_utils import k_nearest_neighbors, chamfer_distance
 from scipy.spatial import cKDTree
 from src.gair_ransac.gair_ransac import gair_ransac
 
-NOISE_STD = 0.2
+NOISE_STD = 0.5
 THRESHOLD = 3*NOISE_STD
 
 def create_and_estimate_supq():
@@ -31,7 +31,7 @@ def create_and_estimate_supq():
     sampled_points_noisy, normals_sp_noisy = samp.sampling_sq_noisy(list_mesh, n_points=30000, noise_std=NOISE_STD, clip_k=3.0, seed=42)
     sampled_points_random, _ = samp.sampling_sq_random(list_mesh, n_points=4000, seed=42)
     sampled_points_random = np.vstack(sampled_points_random)
-    sampled_points_outliers, normals_sp_outliers = samp.sampling_outliers(list_mesh, n_out=1, margin=0.10, mode="uniform", seed=42)
+    sampled_points_outliers, normals_sp_outliers = samp.sampling_outliers(list_mesh, n_out=20500, margin=0.10, mode="uniform", seed=42)
     
     
     

@@ -1,7 +1,7 @@
 import numpy as np
 import maxflow
 from src.superquadrics.superquadric_param import SuperQuadricParams
-from .consensus import distance_err
+from .consensus import distance_err, normal_alignment_score
 # building energy and graph cut
 
 def gair(
@@ -15,6 +15,8 @@ def gair(
     pair_weight: float = 1.0,
     coh_min: float = 0.05,
     outlier_scale: float = 3.0,
+    use_model_normal_agreement: bool = False,
+    model_normal_weight: float = 1.0,
 ) -> np.ndarray:
     # GAIR: Geometric Aware Inlier Refinement via Graph-Cut.
     # points: (N, 3)
@@ -38,7 +40,15 @@ def gair(
     # cost(inlier) = err (normalized), cost(outlier) = 1
     cost_inlier = d_unary.copy()
     cost_outlier = np.zeros(N, dtype=np.float64)
-
+    # Optionally add a normal agreement penalty to the inlier cost, based on the angle between the point normal and the model normal.
+    # The penalty is in [0, model_normal_weight], where 0 means perfect agreement and model_normal_weight means orthogonal (or opposite) normals.
+    # the function used is 0.5*(1 - cos(angle)) which is 0 when angle=0 and 1 when angle=180, scaled by model_normal_weight and clipped to [0, model_normal_weight].
+    """
+    if use_model_normal_agreement:
+        alignment = normal_alignment_score(model, points, normals)
+        normal_penalty = np.clip(0.5 * (1.0 - alignment), 0.0, 1.0)
+        cost_inlier += model_normal_weight * normal_penalty
+    """
     # We'll accumulate extra outlier unary costs derived from pairwise E00
     outlier_add = np.zeros(N, dtype=np.float64)
 

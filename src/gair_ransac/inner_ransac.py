@@ -126,6 +126,7 @@ def inner_ransac(
     refined_set_index: np.ndarray,
     actual_set_index: np.ndarray | None,
     threshold: float,
+    normals: np.ndarray | None = None,
     error_metric: str = "mix",
     consensus_metric: str | None = None,
     n_iters: int = 50,
@@ -134,6 +135,7 @@ def inner_ransac(
     point_cloud = np.asarray(point_cloud, dtype=np.float64)
     refined_set_index = np.asarray(refined_set_index, dtype=np.int64)
     actual_points = point_cloud if actual_set_index is None else point_cloud[np.asarray(actual_set_index, dtype=np.int64)]
+    actual_normals = None if normals is None else np.asarray(normals, dtype=np.float64)
     bounds_reference_points = point_cloud[refined_set_index]
     points: np.ndarray
     sample_size: int = 30 # minimum number of points to fit a superquadric (11 parameters)
@@ -159,7 +161,13 @@ def inner_ransac(
             )
         except Exception:
             continue
-        inlier_set_index = compute_consensus(model, actual_points, threshold, error_metric=consensus_metric)
+        inlier_set_index = compute_consensus(
+            model,
+            actual_points,
+            threshold,
+            error_metric=consensus_metric,
+            normals=actual_normals,
+        )
         count = int(np.count_nonzero(inlier_set_index))
         if count > best_count:
             best_count = count
@@ -178,7 +186,13 @@ def inner_ransac(
                 error_metric=error_metric,
                 bounds_reference_points=inlier_points,
             )
-            refit_inlier_set_index = compute_consensus(refit_model, actual_points, threshold, error_metric=consensus_metric)
+            refit_inlier_set_index = compute_consensus(
+                refit_model,
+                actual_points,
+                threshold,
+                error_metric=consensus_metric,
+                normals=actual_normals,
+            )
             refit_count = int(np.count_nonzero(refit_inlier_set_index))
             if refit_count >= best_count:
                 best_model = refit_model

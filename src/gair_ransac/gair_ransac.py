@@ -75,7 +75,16 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 exception_message = f"Model fitting failed at iteration {j} with sample points:\n{M_j}\nError: {e}"
                 continue
             # Compute the standard consensus set of the candidate model
-            candidate_inliers: BoolArray = np.asarray(compute_consensus(H_j, current_point_cloud, threshold, error_metric=consensus_metric), dtype=bool)
+            candidate_inliers: BoolArray = np.asarray(
+                compute_consensus(
+                    H_j,
+                    current_point_cloud,
+                    threshold,
+                    error_metric=consensus_metric,
+                    normals=V,
+                ),
+                dtype=bool,
+            )
             # Count current candidate inliers and current best inliers
             candidate_count: int = int(np.count_nonzero(candidate_inliers))
             best_count: int = int(np.count_nonzero(best_inliers))
@@ -90,7 +99,19 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             # Local optimization loop: GAIR + inner RANSAC + consensus comparison
             while not terminate:
                 # Refine the current inlier set with GAIR
-                refined_inliers: BoolArray = np.asarray(gair(points=current_point_cloud, edges=edge, normals=V, model=current_model, eps=threshold, error_metric=consensus_metric, use_normal_coherence=use_normal_coherence), dtype=bool)
+                refined_inliers: BoolArray = np.asarray(
+                    gair(
+                        points=current_point_cloud,
+                        edges=edge,
+                        normals=V,
+                        model=current_model,
+                        eps=threshold,
+                        error_metric=consensus_metric,
+                        use_normal_coherence=use_normal_coherence,
+                        use_model_normal_agreement=True,
+                    ),
+                    dtype=bool,
+                )
                 refined_count: int = int(np.count_nonzero(refined_inliers))
                 # Stop if the refined set is too small
                 if refined_count < min_inliers:
@@ -105,6 +126,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     refined_set_index,
                     None,
                     threshold,
+                    normals=V,
                     error_metric=error_metric,
                     consensus_metric=consensus_metric,
                     n_iters=inner_iterations,
@@ -168,7 +190,13 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     bounds_reference_points=best_points,
                 )
                 refit_inliers = np.asarray(
-                    compute_consensus(refit_model, current_point_cloud, threshold, error_metric=consensus_metric),
+                    compute_consensus(
+                        refit_model,
+                        current_point_cloud,
+                        threshold,
+                        error_metric=consensus_metric,
+                        normals=V,
+                    ),
                     dtype=bool,
                 )
                 refit_count = int(np.count_nonzero(refit_inliers))
@@ -194,7 +222,14 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             )
 
         # Remove the inliers of the extracted model from the residual set and all the points too close to it
-        remove_mask = expanded_removal_mask(best_model, current_point_cloud, threshold, factor=1.3, error_metric=consensus_metric)
+        remove_mask = expanded_removal_mask(
+            best_model,
+            current_point_cloud,
+            threshold,
+            factor=1.3,
+            error_metric=consensus_metric,
+            normals=V,
+        )
         remaining_indices = remaining_indices[~remove_mask]
         # Return all extracted models and their global inlier masks
     return models_set, inliers_set, total_best_mss_used
