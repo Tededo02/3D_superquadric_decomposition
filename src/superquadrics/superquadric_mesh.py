@@ -66,8 +66,8 @@ def triangulate_grid(n_eta,n_omega):
             v01 = vid(i,j2)
             v10 = vid(i+1,j)
             v11 = vid(i+1,j2)
-            faces.append([v00, v10, v11])
-            faces.append([v00, v11, v01])
+            faces.append([v00, v11, v10])
+            faces.append([v00, v01, v11])
     return np.array(faces)
 
 
@@ -108,15 +108,14 @@ def grid_faces_numba(n_eta: int, n_omega: int):
 
             # triangolo 1
             F[k, 0] = v00
-            F[k, 1] = v10
-            F[k, 2] = v11
+            F[k, 1] = v11
+            F[k, 2] = v10
             k += 1
 
             # triangolo 2
             F[k, 0] = v00
-            F[k, 1] = v11
-            F[k, 2] = v01
+            F[k, 1] = v01
+            F[k, 2] = v11
             k += 1
 
     return F
-

@@ -24,7 +24,7 @@ def normal_alignment_score(
     normal_norm = np.linalg.norm(normals, axis=1, keepdims=True)
     normal_norm = np.maximum(normal_norm, 1e-9)
     normals_unit = normals / normal_norm
-    return np.einsum("ij,ij->i", model_normals, normals_unit)
+    return np.clip(np.einsum("ij,ij->i", model_normals, normals_unit), -1.0, 1.0)
 
 
 def compute_consensus(
@@ -37,10 +37,8 @@ def compute_consensus(
 ) -> np.ndarray[bool]:
     err = distance_err(model, points, error_metric=error_metric)
     inliers = err < threshold
-    # if normals are provided, further filter inliers by normal alignment
     if normals is not None:
         cos_threshold = DEFAULT_NORMAL_COS_THRESHOLD if normal_cos_threshold is None else float(normal_cos_threshold)
-        # logic and to filter inlier with normal aligned
         inliers &= normal_alignment_score(model, points, normals) >= cos_threshold
     return inliers
 
