@@ -218,6 +218,8 @@ pyproject.toml
 experiments/artifacts/*
 artifacts/*
 test_objects/*
+tests/
+images/
 
 .gitignore
 .vscode

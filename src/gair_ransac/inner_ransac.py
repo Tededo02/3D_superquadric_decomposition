@@ -70,14 +70,14 @@ def fit_superquadric_ls(
     bounds_points = fit_points if bounds_reference_points is None else np.asarray(bounds_reference_points, dtype=np.float64)
     if bounds_points.shape[0] == 0:
         raise ValueError("bounds_reference_points must contain at least one point")
-    # bounds for stability
+    # bounds for stability 
     mins = bounds_points.min(axis=0)
     maxs = bounds_points.max(axis=0)
     diag = float(np.linalg.norm(maxs - mins) + 1e-12)
     a_min = max(1e-3, 5e-2 * diag)
     # MSS samples are local by design, so allow the fit to grow well beyond
     # the patch extent and reach the full object scale during refinement.
-    a_max = max(1e-2, 2.5 * diag)
+    a_max = max(1e-2, 1.2 * diag)
     e_min, e_max = 0.08,4.0
     ang_min, ang_max = -np.pi, np.pi
     t_margin = 0.25 * diag
@@ -107,7 +107,7 @@ def fit_superquadric_ls(
         bounds=(lower, upper),
         loss="soft_l1",
         f_scale=1.0,
-        max_nfev=200
+        max_nfev=250
     )
 
     if not res.success:

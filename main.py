@@ -11,7 +11,7 @@ from scipy.spatial import cKDTree
 from src.gair_ransac.gair_ransac import gair_ransac
 
 NOISE_STD = 0.2
-THRESHOLD = 3*NOISE_STD
+THRESHOLD = 2.5*NOISE_STD
 
 def create_and_estimate_supq():
     # lightblue = ground truth, lightgreen = estimated

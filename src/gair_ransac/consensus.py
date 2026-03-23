@@ -4,12 +4,13 @@ from src.superquadrics.superquadric_residual import superquadric_normal_world,su
 
 
 
-DEFAULT_NORMAL_COS_THRESHOLD = 0.0
+DEFAULT_NORMAL_COS_THRESHOLD = 0.88
 
+def signed_distance_err(model, points, error_metric):
+    return superquadric_residual_vector(model, points, metric=error_metric)
 
-def distance_err(model: SuperQuadricParams, points: np.ndarray, error_metric: str = "first_order") -> np.ndarray:
-    d = superquadric_residual_vector(model, points, metric="radial"if error_metric == "first_order" else error_metric)
-    return np.abs(d)
+def distance_err(model, points, error_metric):
+    return np.abs(signed_distance_err(model, points, error_metric))
 
 # computes the cosine of the angle between the normal of the superquadric at each point and the normal of the point cloud,
 #  as a measure of alignment (1 is perfectly aligned, -1 is opposite, 0 is orthogonal)
@@ -31,14 +32,13 @@ def compute_consensus(
     model: SuperQuadricParams,
     points: np.ndarray,
     threshold: float,
-    error_metric: str = "mix",
+    error_metric: str = "radial",
     normals: np.ndarray | None = None,
-    normal_cos_threshold: float | None = None,
 ) -> np.ndarray[bool]:
     err = distance_err(model, points, error_metric=error_metric)
     inliers = err < threshold
     if normals is not None:
-        cos_threshold = DEFAULT_NORMAL_COS_THRESHOLD if normal_cos_threshold is None else float(normal_cos_threshold)
+        cos_threshold = DEFAULT_NORMAL_COS_THRESHOLD 
         inliers &= normal_alignment_score(model, points, normals) >= cos_threshold
     return inliers
 
@@ -48,13 +48,12 @@ def expanded_removal_mask(
     points: np.ndarray,
     threshold: float,
     factor: float = 1.5,
-    error_metric: str = "mix",
+    error_metric: str = "radial",
     normals: np.ndarray | None = None,
-    normal_cos_threshold: float | None = None,
 ) -> np.ndarray:
     err = distance_err(model, points, error_metric=error_metric)
     remove_mask = err <= factor * threshold
     if normals is not None:
-        cos_threshold = DEFAULT_NORMAL_COS_THRESHOLD if normal_cos_threshold is None else float(normal_cos_threshold)
+        cos_threshold = DEFAULT_NORMAL_COS_THRESHOLD
         remove_mask &= normal_alignment_score(model, points, normals) >= cos_threshold
     return remove_mask

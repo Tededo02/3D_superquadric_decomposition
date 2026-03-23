@@ -19,7 +19,21 @@ def compare_consensus(prev_mask: np.ndarray, new_mask: np.ndarray, min_gain: int
     return int(new_mask.sum()) >= int(prev_mask.sum()) + min_gain
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
+def gair_ransac(point_cloud: np.ndarray, 
+                normals: np.ndarray, 
+                threshold: float, 
+                max_models: int, max_iterations: int,
+                m_neighbors: int = 12, 
+                radius: float = 0.06,
+                radius_is_relative: bool = True,
+                sample_size: int = 30,
+                min_inliers: int =20,
+                min_gain: int = 1,
+                error_metric: str = "radial",
+                consensus_metric: str = "radial", 
+                inner_iterations: int = 50, 
+                random_seed: int | None = None, 
+                use_normal_coherence: bool = True) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
     total_best_mss_used: FloatArray | None = None
 
     # Convert inputs to standard float arrays
@@ -71,8 +85,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 )
             try:
                 H_j: SuperQuadricParams = fit_superquadric_ls(M_j, error_metric="first_order")
-            except Exception as e:
-                exception_message = f"Model fitting failed at iteration {j} with sample points:\n{M_j}\nError: {e}"
+            except Exception:
                 continue
             # Compute the standard consensus set of the candidate model
             candidate_inliers: BoolArray = np.asarray(
@@ -108,7 +121,6 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                         eps=threshold,
                         error_metric=consensus_metric,
                         use_normal_coherence=use_normal_coherence,
-                        use_model_normal_agreement=True,
                     ),
                     dtype=bool,
                 )
@@ -136,6 +148,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 if inner_result.best_inlier_count <= 0:
                     terminate = True
                     continue
+                """
                 # The inlier mask returned by inner_ransac is defined on actual_set_index
                 # Update the current solution only if consensus improves
                 # if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):
@@ -143,7 +156,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 # the update is much more stable in this implementation.
                 # from here
                 new_inliers_mask_c_hat: BoolArray = np.asarray(inner_result.best_inliers_mask, dtype=bool)
-
+                
                 if compare_consensus(current_inliers, new_inliers_mask_c_hat, min_gain=min_gain):
                     current_inliers = new_inliers_mask_c_hat
                     current_count = int(np.count_nonzero(new_inliers_mask_c_hat))
@@ -161,7 +174,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     current_model = inner_result.best_model
                 else:
                     terminate = True
-                """
+                
                 
             # Update the best-so-far solution for the current residual
             if current_count > int(np.count_nonzero(best_inliers)):
@@ -220,16 +233,17 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 if total_best_mss_used is None
                 else np.vstack((total_best_mss_used, best_mss_used))
             )
-
+        
         # Remove the inliers of the extracted model from the residual set and all the points too close to it
         remove_mask = expanded_removal_mask(
             best_model,
             current_point_cloud,
             threshold,
-            factor=1.3,
+            factor=20,
             error_metric=consensus_metric,
             normals=V,
         )
         remaining_indices = remaining_indices[~remove_mask]
+        
         # Return all extracted models and their global inlier masks
     return models_set, inliers_set, total_best_mss_used
