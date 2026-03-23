@@ -6,7 +6,7 @@ from .consensus import compute_consensus, expanded_removal_mask
 from .inner_ransac import inner_ransac, fit_superquadric_ls
 from .gair import gair
 from .initgraph import build_radius_graph
-from .mss import spatial_walk_mss , adaptive_local_fps_mss
+from .mss import spatial_walk_mss , adaptive_local_fps_mss, uniform_partition_mss
 from .inner_ransac import InnerRansacResult
 from numpy.typing import NDArray
 
@@ -19,7 +19,23 @@ def compare_consensus(prev_mask: np.ndarray, new_mask: np.ndarray, min_gain: int
     return int(new_mask.sum()) >= int(prev_mask.sum()) + min_gain
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
+def _sample_superquadric_surface(model: "SuperQuadricParams", n: int = 1000) -> FloatArray:
+    """Sample n points on the superquadric surface parametrically."""
+    eta = np.linspace(-np.pi / 2, np.pi / 2, int(n ** 0.5) + 1)
+    omega = np.linspace(-np.pi, np.pi, int(n ** 0.5) + 1)
+    eta, omega = np.meshgrid(eta, omega)
+    eta, omega = eta.ravel(), omega.ravel()
+    def _sp(val, exp):
+        return np.sign(val) * (np.abs(val) ** exp)
+    x = model.a1 * _sp(np.cos(eta), model.e1) * _sp(np.cos(omega), model.e2)
+    y = model.a2 * _sp(np.cos(eta), model.e1) * _sp(np.sin(omega), model.e2)
+    z = model.a3 * _sp(np.sin(eta), model.e1)
+    pts = np.stack([x, y, z], axis=1)
+    R = model.rotation_matrix()
+    return (pts @ R.T) + model.t
+
+
+def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True, min_coverage: float = 0.0) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
     total_best_mss_used: FloatArray | None = None
 
     # Convert inputs to standard float arrays
@@ -206,6 +222,18 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     best_count = refit_count
             except Exception:
                 pass
+
+        # Coverage check: reject oversized models whose surface is sparsely supported
+        if min_coverage > 0.0:
+            from scipy.spatial import cKDTree as _cKDTree
+            surface_samples = _sample_superquadric_surface(best_model, n=1000)
+            inlier_pts = current_point_cloud[best_inliers]
+            tree_inliers = _cKDTree(inlier_pts)
+            dists, _ = tree_inliers.query(surface_samples, k=1)
+            coverage = float((dists < threshold).mean())
+            if coverage < min_coverage:
+                remaining_indices = remaining_indices[~best_inliers]
+                continue
 
         # Convert the local inlier mask into a global mask over the original point cloud
         global_inliers: BoolArray = np.zeros(n_points, dtype=bool)
