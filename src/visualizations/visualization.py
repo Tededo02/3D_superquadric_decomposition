@@ -44,28 +44,28 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bound
             pl.add_points(mss_points, render_points_as_spheres=True, point_size=point_size*5, color="violet")
         
 
+    '''
     # Assi + griglia “in scena”
-    pl.show_axes()            # triade assi in basso (widget)
-    pl.add_axes()             # assi 3D nell’oggetto (freccioni XYZ)
-    pl.show_grid(             # griglia sul piano (tipo “pavimento”)
-        location="outer",
-        ticks="outside",
-        grid="front",
+    pl.show_axes()
+    pl.add_axes()
+    pl.show_grid(
+        location=”outer”,
+        ticks=”outside”,
+        grid=”front”,
         all_edges=True
     )
 
     # Bounding box + tick con valori (molto utile)
     if show_bounds:
         pl.show_bounds(
-            grid="back",
-            location="outer",
+            grid=”back”,
+            location=”outer”,
             all_edges=True,
-            ticks="outside",
-            xtitle="X", ytitle="Y", ztitle="Z",
+            ticks=”outside”,
+            xtitle=”X”, ytitle=”Y”, ztitle=”Z”,
             font_size=10
         )
-
-
+    
     # --- testo info (range su tutte le mesh) ---
     v = np.vstack(all_vertices) if len(all_vertices) else np.zeros((0, 3))
     if v.shape[0] > 0:
@@ -88,9 +88,13 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bound
         info.append(f"MSS points shown: {len(np.asarray(mss_used).reshape(-1, 3))}")
 
     pl.add_text("\n".join(info), position="upper_left", font_size=10)
+    '''
+    pl.enable_eye_dome_lighting()
 
-    # Camera: inquadra l’oggetto bene
-    pl.reset_camera()
-    pl.enable_eye_dome_lighting()  # migliora la percezione 3D
+    # fixed camera angle (same every run)
+    pl.camera_position = [(-4.5307183938878675, 1.7429659977931096, -0.2853180548569162),
+ (0.0, 0.0, 0.0),
+ (-0.1126909338726822, -0.13171346961495714, 0.9848615716662379)]
 
     pl.show()
+    #print(pl.camera_position)

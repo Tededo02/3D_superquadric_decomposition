@@ -127,7 +127,7 @@ def adaptive_local_fps_mss(
     D: np.ndarray,
     normals: np.ndarray | None = None,
     primitive_type: str = "superquadric",
-    sample_size: int = 30,
+    sample_size: int = 10,
     seed_tries: int = 10,
     candidate_multiplier: float = 4.0,
     initial_k: int = 96,
@@ -241,7 +241,7 @@ def spatial_walk_mss(
     D: np.ndarray,
     normals: np.ndarray | None = None,
     primitive_type: str = 'superquadric',
-    sample_size: int = 30,
+    sample_size: int = 10,
     rng: np.random.Generator | None = None,
 ) -> np.ndarray:
     """
@@ -329,7 +329,7 @@ def spatial_walk_mss(
 
 def uniform_partition_mss(
     D: np.ndarray,
-    pts_per_patch: int = 240,
+    pts_per_patch: int = 50,
     rng: np.random.Generator | None = None,
 ) -> np.ndarray:
     """
