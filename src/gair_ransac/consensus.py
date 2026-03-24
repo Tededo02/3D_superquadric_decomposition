@@ -47,13 +47,9 @@ def expanded_removal_mask(
     model: SuperQuadricParams,
     points: np.ndarray,
     threshold: float,
-    factor: float = 1.5,
+    factor: float = 1.3,
     error_metric: str = "radial",
-    normals: np.ndarray | None = None,
 ) -> np.ndarray:
     err = distance_err(model, points, error_metric=error_metric)
     remove_mask = err <= factor * threshold
-    if normals is not None:
-        cos_threshold = DEFAULT_NORMAL_COS_THRESHOLD
-        remove_mask &= normal_alignment_score(model, points, normals) >= cos_threshold
     return remove_mask

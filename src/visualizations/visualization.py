@@ -1,7 +1,12 @@
 import pyvista as pv
 import numpy as np
+from src.superquadrics.superquadric_residual import superquadric_radial_residual
+from src.gair_ransac.consensus import expanded_removal_mask
 
-def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bounds=True,colors: np.ndarray = None, inlier_mask: np.ndarray = None,mss_used: np.ndarray = None) -> None:
+def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bounds=True,colors: np.ndarray = None, inlier_mask: np.ndarray = None,mss_used: np.ndarray = None,
+        models=None,
+        treshold=0.1
+    ) -> None:
 
     # --- plotter ---
     pl = pv.Plotter()
@@ -12,11 +17,33 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bound
     all_vertices = []
     total_faces = 0
     i:int=0
+    points = None if pts is None else np.asarray(pts, dtype=np.float64).reshape(-1, 3)
+    error_inlier = None
+    remaining_mask = None
+    cloud_point_size = max(point_size * 2, 12)
+    mss_point_size = max(point_size * 5, 18)
+
+    if models and points is not None:
+        error_inlier = np.full(points.shape[0], np.inf, dtype=np.float64)
+        remaining_mask = np.ones(points.shape[0], dtype=bool)
+
+        for model in models:
+            temp_error_inlier = np.abs(superquadric_radial_residual(model, points))
+            error_inlier = np.minimum(error_inlier, temp_error_inlier)
+
+            if not remaining_mask.any():
+                break
+
+            current_indices = np.flatnonzero(remaining_mask)
+            remove_mask = expanded_removal_mask(model, points[current_indices], treshold)
+            remaining_mask[current_indices[remove_mask]] = False
+
     for mesh in meshes:
+
         faces = np.hstack([
             np.full((len(mesh.faces), 1), 3, dtype=np.int64),
             mesh.faces.astype(np.int64)
-        ]).ravel()  # VTK gradisce 1D: [3,i,j,k, 3,i,j,k, ...]
+        ]).ravel() 
         poly = pv.PolyData(mesh.vertices, faces)
         #lightblue
         pl.add_mesh(poly, smooth_shading=True, opacity=0.65,color=colors[i])
@@ -27,68 +54,62 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=6, show_bound
 
     # --- punti (se presenti) ---
     n_points_total = 0
-    if pts is not None:
-        points = np.asarray(pts, dtype=np.float64).reshape(-1, 3) # -1 because numpy can infer the number of points, 3 for XYZ
+    if points is not None:
         n_points_total = points.shape[0] # total number of points across all meshes
-        mask_is_valid = inlier_mask is not None and len(inlier_mask) == n_points_total
-        if mask_is_valid:
-            mask = np.asarray(inlier_mask, dtype=bool)
-            if mask.any():
-                pl.add_points(points[mask], render_points_as_spheres=True, point_size=point_size, color="green")
-            if (~mask).any():
-                pl.add_points(points[~mask], render_points_as_spheres=True, point_size=point_size, color="red", opacity=0.4)
+        has_residual_colormap = error_inlier is not None and np.isfinite(error_inlier).any()
+        if has_residual_colormap:
+            finite_error = error_inlier[np.isfinite(error_inlier)]
+            color_max = float(np.percentile(finite_error, 90))
+            if color_max <= 0.0:
+                color_max = float(finite_error.max())
+            if color_max <= 0.0:
+                color_max = 1.0
+
+            point_cloud = pv.PolyData(points)
+            point_cloud["min_residual"] = np.nan_to_num(
+                error_inlier,
+                nan=color_max,
+                posinf=color_max,
+                neginf=0.0,
+            )
+            pl.add_mesh(
+                point_cloud,
+                scalars="min_residual",
+                cmap="turbo",
+                clim=(0.0, color_max),
+                render_points_as_spheres=True,
+                point_size=cloud_point_size,
+                opacity=1.0,
+                ambient=0.25,
+                specular=0.15,
+                nan_color="black",
+                above_color="#7f0000",
+                scalar_bar_args={
+                    "title": "Min radial residual",
+                    "color": "black",
+                    "fmt": "%.3f",
+                    "vertical": True,
+                    "position_x": 0.82,
+                    "position_y": 0.1,
+                    "width": 0.08,
+                    "height": 0.8,
+                },
+            )
         else:
-            pl.add_points(points, render_points_as_spheres=True, point_size=point_size)
+            mask_is_valid = inlier_mask is not None and len(inlier_mask) == n_points_total
+            if mask_is_valid:
+                mask = np.asarray(inlier_mask, dtype=bool)
+                if mask.any():
+                    pl.add_points(points[mask], render_points_as_spheres=True, point_size=cloud_point_size, color="#00e676")
+                if (~mask).any():
+                    pl.add_points(points[~mask], render_points_as_spheres=True, point_size=cloud_point_size, color="#ff1744", opacity=0.8)
+            else:
+                pl.add_points(points, render_points_as_spheres=True, point_size=cloud_point_size, color="#1565c0")
+                """
         if mss_used is not None:
             mss_points = np.asarray(mss_used, dtype=np.float64).reshape(-1, 3)
-            pl.add_points(mss_points, render_points_as_spheres=True, point_size=point_size*5, color="violet")
-        
-
-    '''
-    # Assi + griglia “in scena”
-    pl.show_axes()
-    pl.add_axes()
-    pl.show_grid(
-        location=”outer”,
-        ticks=”outside”,
-        grid=”front”,
-        all_edges=True
-    )
-
-    # Bounding box + tick con valori (molto utile)
-    if show_bounds:
-        pl.show_bounds(
-            grid=”back”,
-            location=”outer”,
-            all_edges=True,
-            ticks=”outside”,
-            xtitle=”X”, ytitle=”Y”, ztitle=”Z”,
-            font_size=10
-        )
-    
-    # --- testo info (range su tutte le mesh) ---
-    v = np.vstack(all_vertices) if len(all_vertices) else np.zeros((0, 3))
-    if v.shape[0] > 0:
-        vmin = v.min(axis=0)
-        vmax = v.max(axis=0)
-        info = [
-            f"Meshes: {len(meshes)}",
-            f"Vertices (tot): {v.shape[0]}",
-            f"Faces (tot): {total_faces}",
-            f"X range: [{vmin[0]:.3f}, {vmax[0]:.3f}]",
-            f"Y range: [{vmin[1]:.3f}, {vmax[1]:.3f}]",
-            f"Z range: [{vmin[2]:.3f}, {vmax[2]:.3f}]",
-        ]
-    else:
-        info = [f"Meshes: {len(meshes)}"]
-
-    if pts is not None:
-        info.append(f"Sample points: {n_points_total}")
-    if mss_used is not None:
-        info.append(f"MSS points shown: {len(np.asarray(mss_used).reshape(-1, 3))}")
-
-    pl.add_text("\n".join(info), position="upper_left", font_size=10)
-    '''
+            pl.add_points(mss_points, render_points_as_spheres=True, point_size=mss_point_size, color="violet")
+        """
     pl.enable_eye_dome_lighting()
 
     # fixed camera angle (same every run)

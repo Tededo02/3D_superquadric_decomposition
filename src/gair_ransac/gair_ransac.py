@@ -255,7 +255,6 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             threshold,
             factor=20,
             error_metric=consensus_metric,
-            normals=V,
         )
         remaining_indices = remaining_indices[~remove_mask]
         

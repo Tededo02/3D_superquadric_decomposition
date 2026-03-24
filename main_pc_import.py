@@ -12,18 +12,41 @@ from scipy.spatial import cKDTree
 from src.gair_ransac.gair_ransac import gair_ransac
 
 THRESHOLD = 0.1
-PC_FILE = Path("src/point_clouds/mushroom.glb")  # <-- change this
+PROJECT_ROOT = Path(__file__).resolve().parent
+PC_FILE = PROJECT_ROOT / "test_objects" / "anthropomorphic_mushroom_character.glb"
 
-def create_and_estimate_supq():
+
+def resolve_input_mesh_path(pc_file: str | Path) -> Path:
+    mesh_path = Path(pc_file).expanduser()
+    if not mesh_path.is_absolute():
+        mesh_path = PROJECT_ROOT / mesh_path
+
+    if mesh_path.exists():
+        return mesh_path
+
+    available_meshes = sorted(
+        path.relative_to(PROJECT_ROOT)
+        for pattern in ("*.glb", "*.stl", "*.obj", "*.ply")
+        for path in PROJECT_ROOT.rglob(pattern)
+    )
+    available_hint = ", ".join(str(path) for path in available_meshes[:10])
+    raise FileNotFoundError(
+        f"Input mesh not found: {mesh_path}\n"
+        f"Available meshes in repo: {available_hint}"
+    )
+
+
+def create_and_estimate_supq(pc_file: str | Path = PC_FILE):
     # --- load point cloud from file ---
-    scene = trimesh.load(str(PC_FILE))
+    mesh_path = resolve_input_mesh_path(pc_file)
+    scene = trimesh.load(str(mesh_path))
     if isinstance(scene, trimesh.Scene):
         mesh_raw = trimesh.util.concatenate(list(scene.geometry.values()))
     else:
         mesh_raw = scene
     sampled_points = np.asarray(mesh_raw.vertices, dtype=np.float64)
     normals = np.asarray(mesh_raw.vertex_normals, dtype=np.float64)
-    print(f"Loaded {sampled_points.shape[0]} points from {PC_FILE.name}")
+    print(f"Loaded {sampled_points.shape[0]} points from {mesh_path.name}")
 
     list_mesh = []
     colors = []
@@ -32,7 +55,7 @@ def create_and_estimate_supq():
     total_best_mss_used = None
 
     algorithm = "gair-ransac"
-    max_models = 50 # <-- how many superquadrics to find
+    max_models = 2 # <-- how many superquadrics to find
 
     if algorithm == "ls":
         small_sample = sampled_points[:30]
@@ -53,7 +76,7 @@ def create_and_estimate_supq():
             colors.append(palette[i % len(palette)])
     elif algorithm == "gair-ransac":
         graph_radius = 0.08
-        models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=THRESHOLD, max_models=max_models, max_iterations=50, inner_iterations=80, radius=graph_radius, use_normal_coherence=True, min_coverage=0.4)
+        models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=THRESHOLD, max_models=max_models, max_iterations=2, inner_iterations=80, radius=graph_radius, use_normal_coherence=True, min_coverage=0.4)
         if not models:
             raise RuntimeError("gair_ransac did not return any model")
         for i, model in enumerate(models):
@@ -90,12 +113,16 @@ def create_and_estimate_supq():
         colors=colors,
         inlier_mask=inlier_mask,
         mss_used=total_best_mss_used if algorithm == "gair-ransac" else None,
+        models=models,
+        treshold=THRESHOLD
     )
 
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    create_and_estimate_supq()
+
+    input_mesh = argv[0] if argv else PC_FILE
+    create_and_estimate_supq(input_mesh)
     return 0
 
 
