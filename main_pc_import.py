@@ -14,6 +14,7 @@ from src.gair_ransac.gair_ransac import gair_ransac
 THRESHOLD = 0.1
 PROJECT_ROOT = Path(__file__).resolve().parent
 PC_FILE = PROJECT_ROOT / "test_objects" / "anthropomorphic_mushroom_character.glb"
+N_POINTS: int | None = None
 
 
 def resolve_input_mesh_path(pc_file: str | Path) -> Path:
@@ -44,8 +45,15 @@ def create_and_estimate_supq(pc_file: str | Path = PC_FILE):
         mesh_raw = trimesh.util.concatenate(list(scene.geometry.values()))
     else:
         mesh_raw = scene
-    sampled_points = np.asarray(mesh_raw.vertices, dtype=np.float64)
-    normals = np.asarray(mesh_raw.vertex_normals, dtype=np.float64)
+
+    if N_POINTS is None:
+        sampled_points = np.asarray(mesh_raw.vertices, dtype=np.float64)
+        normals = np.asarray(mesh_raw.vertex_normals, dtype=np.float64)
+    else:
+        sampled_points, face_idx = trimesh.sample.sample_surface(mesh_raw, N_POINTS)
+        sampled_points = np.asarray(sampled_points, dtype=np.float64)
+        normals = np.asarray(mesh_raw.face_normals[face_idx], dtype=np.float64)
+
     print(f"Loaded {sampled_points.shape[0]} points from {mesh_path.name}")
 
     list_mesh = []
@@ -55,7 +63,7 @@ def create_and_estimate_supq(pc_file: str | Path = PC_FILE):
     total_best_mss_used = None
 
     algorithm = "gair-ransac"
-    max_models = 2 # <-- how many superquadrics to find
+    max_models = 1 # <-- how many superquadrics to find
 
     if algorithm == "ls":
         small_sample = sampled_points[:30]

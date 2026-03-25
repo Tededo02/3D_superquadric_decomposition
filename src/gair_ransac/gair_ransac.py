@@ -1,7 +1,9 @@
+from pathlib import Path
 from typing import Optional
 import numpy as np
 
 from src.superquadrics.superquadric_param import SuperQuadricParams
+from src.visualizations.visualization import save_point_cloud_inlier_view
 from .consensus import compute_consensus, expanded_removal_mask
 from .inner_ransac import inner_ransac, fit_superquadric_ls
 from .gair import gair
@@ -13,10 +15,28 @@ from numpy.typing import NDArray
 FloatArray = NDArray[np.float64]
 BoolArray = NDArray[np.bool_]
 IntArray = NDArray[np.int64]
+IMAGES_DIR = Path(__file__).resolve().parents[2] / "images"
 
 
 def compare_consensus(prev_mask: np.ndarray, new_mask: np.ndarray, min_gain: int = 1) -> bool:
     return int(new_mask.sum()) >= int(prev_mask.sum()) + min_gain
+
+
+def _point_subset_mask(points: FloatArray, subset_points: np.ndarray, atol: float = 1e-12) -> BoolArray:
+    mask = np.zeros(points.shape[0], dtype=bool)
+    if subset_points.size == 0:
+        return mask
+
+    subset_points = np.asarray(subset_points)
+    if subset_points.dtype == bool:
+        if subset_points.shape[0] != points.shape[0]:
+            raise ValueError(f"Boolean mask must have length {points.shape[0]}, got {subset_points.shape[0]}")
+        return subset_points.astype(bool, copy=False)
+
+    subset_points = np.asarray(subset_points, dtype=np.float64).reshape(-1, 3)
+    for sample_point in subset_points:
+        mask |= np.all(np.isclose(points, sample_point, atol=atol, rtol=0.0), axis=1)
+    return mask
 
 
 def _sample_superquadric_surface(model: "SuperQuadricParams", n: int = 1000) -> FloatArray:
@@ -85,6 +105,11 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     ),
                     dtype=np.float64,
                 )
+            save_point_cloud_inlier_view(
+                current_point_cloud,
+                _point_subset_mask(current_point_cloud, M_j),
+                IMAGES_DIR / f"gair_ransac_model_{k + 1:02d}_hyp_{j + 1:03d}_mss.png",
+            )
             try:
                 H_j: SuperQuadricParams = fit_superquadric_ls(M_j, error_metric="first_order")
             except Exception:
@@ -111,6 +136,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             current_inliers: BoolArray = candidate_inliers.copy()
             current_count: int = candidate_count
             terminate: bool = False
+            local_iteration: int = 0
             # Local optimization loop: GAIR + inner RANSAC + consensus comparison
             while not terminate:
                 # Refine the current inlier set with GAIR
@@ -123,8 +149,15 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                         eps=threshold,
                         error_metric=consensus_metric,
                         use_normal_coherence=use_normal_coherence,
+                        use_model_normal_agreement=True,
                     ),
                     dtype=bool,
+                )
+                local_iteration += 1
+                save_point_cloud_inlier_view(
+                    current_point_cloud,
+                    refined_inliers,
+                    IMAGES_DIR / f"gair_ransac_model_{k + 1:02d}_hyp_{j + 1:03d}_gair_{local_iteration:02d}.png",
                 )
                 refined_count: int = int(np.count_nonzero(refined_inliers))
                 # Stop if the refined set is too small
@@ -150,7 +183,6 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 if inner_result.best_inlier_count <= 0:
                     terminate = True
                     continue
-                """
                 # The inlier mask returned by inner_ransac is defined on actual_set_index
                 # Update the current solution only if consensus improves
                 # if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):
@@ -158,26 +190,17 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 # the update is much more stable in this implementation.
                 # from here
                 new_inliers_mask_c_hat: BoolArray = np.asarray(inner_result.best_inliers_mask, dtype=bool)
-                
+
                 if compare_consensus(current_inliers, new_inliers_mask_c_hat, min_gain=min_gain):
                     current_inliers = new_inliers_mask_c_hat
                     current_count = int(np.count_nonzero(new_inliers_mask_c_hat))
                     current_model = inner_result.best_model
                 else:
                     terminate = True
-                
-                
+
+
                 # The paper does not use c_hat, but with c_hat
-                # to here 
-                """
-                if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):
-                    current_inliers = refined_inliers
-                    current_count = int(np.count_nonzero(refined_inliers))
-                    current_model = inner_result.best_model
-                else:
-                    terminate = True
-                
-                
+                # to here
             # Update the best-so-far solution for the current residual
             if current_count > int(np.count_nonzero(best_inliers)):
                 best_model = current_model
@@ -253,8 +276,9 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             best_model,
             current_point_cloud,
             threshold,
-            factor=20,
+            factor=1.3,
             error_metric=consensus_metric,
+            normals=V,
         )
         remaining_indices = remaining_indices[~remove_mask]
         

@@ -1,7 +1,61 @@
+from pathlib import Path
+
 import pyvista as pv
 import numpy as np
 from src.superquadrics.superquadric_residual import superquadric_radial_residual
 from src.gair_ransac.consensus import expanded_removal_mask
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CAMERA_POSITION = [
+    (-4.5307183938878675, 1.7429659977931096, -0.2853180548569162),
+    (0.0, 0.0, 0.0),
+    (-0.1126909338726822, -0.13171346961495714, 0.9848615716662379),
+]
+
+
+def save_point_cloud_inlier_view(
+    points: np.ndarray,
+    inlier_mask: np.ndarray,
+    output_path: str | Path,
+    point_size: int = 8,
+) -> Path:
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    mask = np.asarray(inlier_mask, dtype=bool).reshape(-1)
+    if mask.shape[0] != points.shape[0]:
+        raise ValueError(f"inlier_mask must have length {points.shape[0]}, got {mask.shape[0]}")
+
+    image_path = Path(output_path)
+    if not image_path.is_absolute():
+        image_path = PROJECT_ROOT / image_path
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+
+    display_point_size = max(point_size * 2, 12)
+    pl = pv.Plotter(off_screen=True, window_size=(1600, 1200))
+    pl.set_background("white")
+
+    if (~mask).any():
+        pl.add_points(
+            points[~mask],
+            render_points_as_spheres=True,
+            point_size=display_point_size/3,
+            color="black",
+            opacity=0.95,
+        )
+    if mask.any():
+        pl.add_points(
+            points[mask],
+            render_points_as_spheres=True,
+            point_size=display_point_size,
+            color="red",
+            opacity=1.0,
+        )
+
+    pl.enable_eye_dome_lighting()
+    pl.camera_position = DEFAULT_CAMERA_POSITION
+    pl.screenshot(str(image_path))
+    pl.close()
+    return image_path
+
 
 def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bounds=True,colors: np.ndarray = None, inlier_mask: np.ndarray = None,mss_used: np.ndarray = None,
         models=None,
@@ -113,9 +167,7 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
     pl.enable_eye_dome_lighting()
 
     # fixed camera angle (same every run)
-    pl.camera_position = [(-4.5307183938878675, 1.7429659977931096, -0.2853180548569162),
- (0.0, 0.0, 0.0),
- (-0.1126909338726822, -0.13171346961495714, 0.9848615716662379)]
+    pl.camera_position = DEFAULT_CAMERA_POSITION
 
     pl.show()
     #print(pl.camera_position)
