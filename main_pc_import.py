@@ -83,7 +83,7 @@ def create_and_estimate_supq(pc_file: str | Path = PC_FILE):
             list_mesh.append(supmesh.superquadric_mesh(model))
             colors.append(palette[i % len(palette)])
     elif algorithm == "gair-ransac":
-        graph_radius = 0.08
+        graph_radius = 0.06
         models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=THRESHOLD, max_models=max_models, max_iterations=2, inner_iterations=80, radius=graph_radius, use_normal_coherence=True, min_coverage=0.4)
         if not models:
             raise RuntimeError("gair_ransac did not return any model")

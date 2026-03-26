@@ -89,7 +89,15 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
                 break
 
             current_indices = np.flatnonzero(remaining_mask)
-            remove_mask = expanded_removal_mask(model, points[current_indices], treshold)
+            # Keep the original colormap semantics from commit `colormap`,
+            # independent from newer consensus defaults used elsewhere.
+            remove_mask = expanded_removal_mask(
+                model,
+                points[current_indices],
+                treshold,
+                factor=1.3,
+                error_metric="radial",
+            )
             remaining_mask[current_indices[remove_mask]] = False
 
     for mesh in meshes:
