@@ -3,24 +3,46 @@ from trimesh import Trimesh
 import trimesh
 
 
+def _make_rng(seed: int | None) -> np.random.Generator:
+    return np.random.default_rng(seed)
+
+
+def _next_surface_seed(rng: np.random.Generator) -> int:
+    return int(rng.integers(0, np.iinfo(np.int32).max))
+
+
 # sample points on the surface of the superquadric meshes
 # uniformly in area. each mesh in the list is sampled with n_points points
 # the result is a list of arrays of points
-def sampling_sq(mesh_list: list[Trimesh], n_points: int = 1000) -> tuple[list[np.ndarray], list[np.ndarray]]:
+def sampling_sq(
+    mesh_list: list[Trimesh],
+    n_points: int = 1000,
+    seed: int | None = None,
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    rng = _make_rng(seed)
     points_list: list[np.ndarray] = []
     normals_list: list[np.ndarray] = []
     for mesh in mesh_list:
-        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points) # pts are type numpy array of shape (n_points,3) and coordinates are type float64
+        pts, face_idx = trimesh.sample.sample_surface(
+            mesh,
+            n_points,
+            seed=_next_surface_seed(rng),
+        ) # pts are type numpy array of shape (n_points,3) and coordinates are type float64
         normals = mesh.face_normals[face_idx].astype(np.float64, copy=False)
         points_list.append(pts)
         normals_list.append(normals)
     return points_list, normals_list
 
 def sampling_sq_random(mesh_list: list[Trimesh], n_points: int = 1000, seed: int | None = None) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    rng = _make_rng(seed)
     points_list: list[np.ndarray] = []
     normals_list: list[np.ndarray] = []
     for mesh in mesh_list:
-        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points, seed=seed) # pts are type numpy array of shape (n_points,3) and coordinates are type float64
+        pts, face_idx = trimesh.sample.sample_surface(
+            mesh,
+            n_points,
+            seed=_next_surface_seed(rng),
+        ) # pts are type numpy array of shape (n_points,3) and coordinates are type float64
         normals = mesh.face_normals[face_idx].astype(np.float64, copy=False)
         points_list.append(pts)
         normals_list.append(normals)
@@ -29,14 +51,18 @@ def sampling_sq_random(mesh_list: list[Trimesh], n_points: int = 1000, seed: int
 # sample points on the surface of the superquadric meshes with noise along the normal direction.
 # Returned normals can also be perturbed with Gaussian noise around the exact direction.
 def sampling_sq_noisy(mesh_list: list[Trimesh],n_points: int = 1000,noise_std: float = 0.01,normal_noise_std: float | None = None,clip_k: float | None = 3.0,seed: int | None = None,) -> tuple[list[np.ndarray], list[np.ndarray]]:
-    rng = np.random.default_rng(seed)
+    rng = _make_rng(seed)
     points_list: list[np.ndarray] = []
     normals_list: list[np.ndarray] = []
     normal_noise_std = 0.0 if normal_noise_std is None else normal_noise_std
 
     for mesh in mesh_list:
         # sample points on surface + get which face each point came from
-        pts, face_idx = trimesh.sample.sample_surface(mesh, n_points)  # pts: (N,3), face_idx: (N,)
+        pts, face_idx = trimesh.sample.sample_surface(
+            mesh,
+            n_points,
+            seed=_next_surface_seed(rng),
+        )  # pts: (N,3), face_idx: (N,)
         pts = pts.astype(np.float64, copy=False)
         # get the corresponding face normals (one normal per sampled point)
         normals = mesh.face_normals[face_idx].astype(np.float64, copy=False)  # (N,3), already unit-length
@@ -117,5 +143,4 @@ def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: flo
         return pts.astype(np.float64),outlier_normals
 
     raise ValueError(f"Unknown mode '{mode}'. Use: 'uniform', 'mog'.")
-
 

@@ -134,6 +134,7 @@ def adaptive_local_fps_mss(
     normal_cos_min: float = 0.35,
     tangent_cos_max: float = 0.55,
     rng: np.random.Generator | None = None,
+    random_seed: int | None = None,
 ) -> np.ndarray:
     """
     Robust local MSS for detached, touching, and mildly overlapping shapes.
@@ -148,7 +149,7 @@ def adaptive_local_fps_mss(
     does not cross an entire connected structure when two superquadrics touch.
     """
     if rng is None:
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(random_seed)
 
     N = len(D)
 
@@ -243,6 +244,7 @@ def spatial_walk_mss(
     primitive_type: str = 'superquadric',
     sample_size: int = 10,
     rng: np.random.Generator | None = None,
+    random_seed: int | None = None,
 ) -> np.ndarray:
     """
     MSS via density-weighted spatial walk on a voxel grid.
@@ -253,7 +255,7 @@ def spatial_walk_mss(
 
     """
     if rng is None:
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(random_seed)
 
     N = len(D)
 
@@ -291,7 +293,7 @@ def spatial_walk_mss(
     while len(selected_indices) < sample_size and frontier:
         # pick next voxel from frontier, weighted by density
         # in the first loop frontier is just the seed, so it forces the algorithm to pick it.
-        fl      = list(frontier)
+        fl      = sorted(frontier)
         fc      = np.array([len(voxel_map[v]) for v in fl], dtype=float)
         voxel   = fl[rng.choice(len(fl), p=fc / fc.sum())]
         frontier.discard(voxel)
@@ -324,13 +326,14 @@ def spatial_walk_mss(
         if n_pad > 0:
             selected_indices.update(int(i) for i in rng.choice(remaining, size=n_pad, replace=False))
 
-    return D[np.array(list(selected_indices)[:sample_size], dtype=int)]
+    return D[np.array(sorted(selected_indices)[:sample_size], dtype=int)]
 
 
 def uniform_partition_mss(
     D: np.ndarray,
     pts_per_patch: int = 50,
     rng: np.random.Generator | None = None,
+    random_seed: int | None = None,
 ) -> np.ndarray:
     """
     Partitions the point cloud into equal-count patches, sample _PTS_PER_PATCH from each.
@@ -342,7 +345,7 @@ def uniform_partition_mss(
     so coverage is more uniform over the surface.
     """
     if rng is None:
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(random_seed)
 
     N = len(D)
     if N < _PTS_PER_PATCH:
