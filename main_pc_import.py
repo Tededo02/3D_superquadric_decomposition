@@ -139,8 +139,8 @@ def create_and_estimate_supq(
         for i, model in enumerate(models):
             list_mesh.append(supmesh.superquadric_mesh(model))
             colors.append(palette[i % len(palette)])
-    elif algorithm == "gair-ransac":
-        graph_radius = 0.06
+    elif algorithm in ("gair-ransac", "gc-ransac"):
+        graph_radius = 0.08
         models, inliers_masks, total_best_mss_used = gair_ransac(
             sampled_points,
             normals,
@@ -149,21 +149,7 @@ def create_and_estimate_supq(
             max_iterations=2,
             inner_iterations=80,
             radius=graph_radius,
-            use_normal_coherence=True,
-            min_coverage=0.4,
-            random_seed=run_seeds.algorithm,
-        )
-    elif algorithm == "gc-ransac":
-        graph_radius = 0.06
-        models, inliers_masks, total_best_mss_used = gair_ransac(
-            sampled_points,
-            normals,
-            threshold=THRESHOLD,
-            max_models=max_models,
-            max_iterations=2,
-            inner_iterations=80,
-            radius=graph_radius,
-            use_normal_coherence=False,
+            use_normal_coherence=(algorithm == "gair-ransac"),
             min_coverage=0.4,
             random_seed=run_seeds.algorithm,
         )
@@ -177,7 +163,7 @@ def create_and_estimate_supq(
 
     if algorithm == "inner-ransac":
         inlier_mask = theta0.best_inliers_mask
-    elif algorithm in ("ransac", "gair-ransac"):
+    elif algorithm in ("ransac", "gair-ransac", "gc-ransac"):
         inlier_mask = None
         if inliers_masks:
             inlier_mask = inliers_masks[0].copy()
@@ -208,7 +194,7 @@ def create_and_estimate_supq(
         show_bounds=True,
         colors=colors,
         inlier_mask=inlier_mask,
-        mss_used=total_best_mss_used if algorithm == "gair-ransac" else None,
+        mss_used=total_best_mss_used if algorithm in ("gair-ransac", "gc-ransac") else None,
         models=models,
         treshold=THRESHOLD
     )
