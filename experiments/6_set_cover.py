@@ -1,18 +1,11 @@
-"""
-6_set_cover.py
-==============
-Runs sequential RANSAC N times with random subsampling, collects all candidate
-models, re-evaluates their inliers on the full point cloud, then applies a
-greedy set-cover to select either:
-  - the minimum number of models that covers all points  (mode="min")
-  - the best K models that cover the most points         (mode="topk")
-"""
-
+import csv
+import math
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
+import pyvista as pv
 import trimesh
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,25 +15,36 @@ if str(ROOT) not in sys.path:
 from point_cloud_utils import chamfer_distance
 from scipy.spatial import cKDTree
 from src.gair_ransac.gair_ransac import gair_ransac
-from src.gair_ransac.consensus import compute_consensus
 from src.superquadrics import superquadric_mesh as supmesh
+from src.superquadrics import superquadric_residual as supres
 from src.superquadrics import superquadric_sampling as samp
 from src.visualizations import visualization as vis
 
 # ── config ─────────────────────────────────────────────────────────────────────
-VISUALIZE    = True
+VISUALIZE    = False
 PC_FILE      = ROOT / "src" / "point_clouds" / "mushroom.glb"
-THRESHOLD    = 0.05
+THRESHOLD    = 0.1
 GRAPH_RADIUS = 0.06
-MAX_MODELS   = 5       # max models per RANSAC run
+MAX_MODELS   = 2
 MAX_ITER     = 5
 INNER_ITER   = 100
-N_RUNS       = 3      # how many times to run sequential RANSAC
-SUBSAMPLE    = 0.8     # fraction of points used per run (perturbation); 1.0 = no subsample
-K            = 5       # max models to consider; algorithm stops early if gain <= 0
+N_RUNS       = 5       # subsampled RANSAC runs per trial (candidates collection)
+N_TRIALS     = 5
+SUBSAMPLE    = 0.8
+K            = 5       # max models for set-cover
 EVAL_SEED    = 42
-ALGORITHM    = "gair-ransac"  # "gair-ransac" or "gc-ransac"
+OUT_DIR      = ROOT / "experiments" / "artifacts" / "6_set_cover"
 # ───────────────────────────────────────────────────────────────────────────────
+
+CAMERA_POSITIONS = [
+    ( 6.0,  0.0,  0.5),
+    (-6.0,  0.0,  0.5),
+    ( 0.0,  6.0,  0.5),
+    ( 0.0, -6.0,  0.5),
+    ( 4.0,  4.0,  6.0),
+]
+ANGLE_NAMES = ["front", "back", "left", "right", "top"]
+PALETTE = ["lightgreen", "orange", "violet", "cyan", "yellow", "red", "lime", "pink", "gold", "turquoise"]
 
 
 def load_point_cloud(path: Path):
@@ -54,139 +58,27 @@ def load_point_cloud(path: Path):
     return points, normals
 
 
-def collect_candidates(points, normals, rng) -> list:
-    """Run sequential RANSAC N_RUNS times, return all candidate models."""
-    candidates = []
-    use_normal_coherence = (ALGORITHM == "gair-ransac")
-    for run in range(N_RUNS):
-        seed = int(rng.integers(0, 2**31))
+def run_one(points, normals, algorithm: str, seed: int):
+    """Exactly like experiment 5: one trial = one sequential RANSAC run."""
+    t0 = time.perf_counter()
+    use_normal_coherence = (algorithm == "gair-ransac")
+    models, _, _ = gair_ransac(
+        points, normals,
+        threshold=THRESHOLD,
+        max_models=MAX_MODELS,
+        max_iterations=MAX_ITER,
+        inner_iterations=INNER_ITER,
+        radius=GRAPH_RADIUS,
+        use_normal_coherence=use_normal_coherence,
+        min_coverage=0.4,
+        random_seed=seed,
+    )
+    runtime = time.perf_counter() - t0
 
-        # subsample for perturbation
-        if SUBSAMPLE < 1.0:
-            n = len(points)
-            idx = rng.choice(n, size=int(n * SUBSAMPLE), replace=False)
-            pts_run = points[idx]
-            nor_run = normals[idx]
-        else:
-            pts_run, nor_run = points, normals
+    if not models:
+        return None
 
-        t0 = time.perf_counter()
-        models, _, _ = gair_ransac(
-            pts_run, nor_run,
-            threshold=THRESHOLD,
-            max_models=MAX_MODELS,
-            max_iterations=MAX_ITER,
-            inner_iterations=INNER_ITER,
-            radius=GRAPH_RADIUS,
-            use_normal_coherence=use_normal_coherence,
-            min_coverage=0.4,
-            random_seed=seed,
-        )
-        elapsed = time.perf_counter() - t0
-        print(f"  run {run:2d} | {len(models)} models  ({elapsed:.1f}s)")
-        candidates.extend(models)
-
-    print(f"Total candidates: {len(candidates)}")
-    return candidates
-
-
-def compute_all_inliers(candidates, points, normals):
-    """Re-evaluate each candidate on the full point cloud."""
-    inlier_masks = []
-    for model in candidates:
-        mask = compute_consensus(model, points, THRESHOLD, error_metric="radial")
-        inlier_masks.append(mask)
-    return inlier_masks
-
-
-def formula_select(inlier_masks, n_points, k_max):
-    """
-    For each k in 1..k_max, greedily pick k models by unique coverage,
-    then compute:
-
-        score(k) = SUM_i( unique_i ) - k * (N / K_max)
-                 = total_unique(k)   - k * cost_per_model
-
-    where cost_per_model = N / k_max is fixed (the fair-share if all
-    k_max slots were equally used).  A model is worth adding only if
-    it contributes more than cost_per_model unique points; otherwise
-    it drags the score down.
-
-    K* = argmax_k score(k).
-    """
-    cost_per_model = n_points / k_max
-
-    # --- greedy pass: record unique coverage at each step ---
-    covered        = np.zeros(n_points, dtype=bool)
-    remaining      = list(range(len(inlier_masks)))
-    greedy_order   = []
-    unique_per_step = []
-
-    for _ in range(k_max):
-        if not remaining:
-            break
-        best_idx = max(remaining, key=lambda i: (inlier_masks[i] & ~covered).sum())
-        new_pts  = int((inlier_masks[best_idx] & ~covered).sum())
-        if new_pts == 0:
-            break
-        covered |= inlier_masks[best_idx]
-        greedy_order.append(best_idx)
-        unique_per_step.append(new_pts)
-        remaining.remove(best_idx)
-
-    # --- evaluate score(k) for each k ---
-    print(f"\n  cost_per_model = N/K_max = {n_points}/{k_max} = {cost_per_model:.0f}")
-    print(f"\n  {'k':>3}  {'unique_covered':>14}  {'marginal':>9}  {'score':>8}")
-    best_score = -np.inf
-    best_k     = 1
-    cumulative = 0
-    for k, u in enumerate(unique_per_step, start=1):
-        cumulative += u
-        score = cumulative - k * cost_per_model
-        print(f"  {k:>3}  {cumulative:>14}  {u:>+9.0f}  {score:>+8.0f}  {'<-- best' if score > best_score else ''}")
-        if score > best_score:
-            best_score = score
-            best_k     = k
-
-    print(f"\n  => best K={best_k}  score={best_score:+.0f}")
-    return greedy_order[:best_k]
-
-
-def main():
-    print(f"Loading {PC_FILE.name} ...")
-    points, normals = load_point_cloud(PC_FILE)
-    print(f"  {len(points)} points\n")
-
-    rng = np.random.default_rng()
-
-    # --- step 1: collect candidates ---
-    print(f"=== collecting candidates ({N_RUNS} runs x up to {MAX_MODELS} models) ===")
-    candidates = collect_candidates(points, normals, rng)
-    if not candidates:
-        print("No candidates found.")
-        return
-
-    # --- step 2: re-evaluate inliers on full cloud ---
-    print("\n=== re-evaluating inliers on full point cloud ===")
-    inlier_masks = compute_all_inliers(candidates, points, normals)
-    inlier_counts = [m.sum() for m in inlier_masks]
-    print(f"  inlier counts: min={min(inlier_counts)}  max={max(inlier_counts)}  mean={np.mean(inlier_counts):.0f}")
-
-    # --- step 3: formula selection ---
-    print(f"\n=== formula selection (k_max={K}) ===")
-    selected_idx = formula_select(inlier_masks, len(points), k_max=3*K)
-
-    selected_models = [candidates[i] for i in selected_idx]
-    selected_masks  = [inlier_masks[i] for i in selected_idx]
-
-    # combined inlier mask
-    combined_mask = np.zeros(len(points), dtype=bool)
-    for m in selected_masks:
-        combined_mask |= m
-    print(f"\nSelected {len(selected_models)} models covering {combined_mask.sum()}/{len(points)} points ({combined_mask.mean():.1%})")
-
-    # --- step 4: metrics ---
-    meshes = [supmesh.superquadric_mesh(m) for m in selected_models]
+    meshes = [supmesh.superquadric_mesh(m) for m in models]
     sampled_est, _ = samp.sampling_sq_random(meshes, n_points=4000, seed=EVAL_SEED)
     est_pts = np.vstack(sampled_est)
 
@@ -195,16 +87,143 @@ def main():
     tree_inp = cKDTree(points)
     hd = max(tree_est.query(points, k=1)[0].max(),
              tree_inp.query(est_pts, k=1)[0].max())
-    print(f"CD={cd:.4f}  HD={hd:.4f}")
 
-    # --- step 5: visualize ---
-    if VISUALIZE:
-        palette = ["lightgreen", "orange", "violet", "cyan", "yellow", "red", "lime", "pink", "gold", "turquoise"]
-        colors = [palette[i % len(palette)] for i in range(len(meshes))]
-        vis.show_mesh_and_points(
-            meshes, pts=points, point_size=5,
-            colors=colors, inlier_mask=combined_mask, models=selected_models,
-        )
+    return {"chamfer": cd, "hausdorff": hd, "runtime_s": runtime, "n_models": len(models), "models": models}
+
+
+def score_combo(combo_indices, candidates, points):
+    meshes = [supmesh.superquadric_mesh(candidates[i]) for i in combo_indices]
+    sampled, _ = samp.sampling_sq_random(meshes, n_points=4000, seed=EVAL_SEED)
+    return chamfer_distance(points, np.vstack(sampled))
+
+
+def exhaustive_best_cover(candidates, points, k_max):
+    from itertools import combinations
+    n = len(candidates)
+    overall_best_score = np.inf
+    overall_best_combo = None
+    overall_best_k = None
+    for k in range(1, k_max + 1):
+        n_combos = math.comb(n, k)
+        print(f"  k={k}  ({n_combos} combinations)")
+        best_score = np.inf
+        best_combo = None
+        for combo in combinations(range(n), k):
+            score = score_combo(combo, candidates, points)
+            if score < best_score:
+                best_score = score
+                best_combo = combo
+        print(f"  best combo={best_combo}  cd={best_score:.4f}")
+        if best_score < overall_best_score:
+            overall_best_score = best_score
+            overall_best_combo = best_combo
+            overall_best_k = k
+    print(f"\n  => best K={overall_best_k}  combo={overall_best_combo}  cd={overall_best_score:.4f}")
+    return list(overall_best_combo)
+
+
+def save_screenshots(tag: str, meshes, points, colors):
+    for cam_pos, angle in zip(CAMERA_POSITIONS, ANGLE_NAMES):
+        pl = pv.Plotter(off_screen=True, window_size=(1600, 1200))
+        pl.set_background("white")
+        for mesh, color in zip(meshes, colors):
+            faces = np.hstack([
+                np.full((len(mesh.faces), 1), 3, dtype=np.int64),
+                mesh.faces.astype(np.int64),
+            ]).ravel()
+            pl.add_mesh(pv.PolyData(mesh.vertices, faces), smooth_shading=True, opacity=0.7, color=color)
+        pl.add_points(points, render_points_as_spheres=True, point_size=4, color="black", opacity=0.3)
+        pl.enable_eye_dome_lighting()
+        pl.camera_position = [cam_pos, (0, 0, 0), (0, 0, 1)]
+        img_path = OUT_DIR / f"{tag}_{angle}.png"
+        pl.screenshot(str(img_path))
+        pl.close()
+        print(f"  saved {img_path.name}")
+
+
+def main():
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Loading point cloud from {PC_FILE.name} ...")
+    points, normals = load_point_cloud(PC_FILE)
+    print(f"  {points.shape[0]} points loaded")
+
+    rng = np.random.default_rng()
+    algorithms = ["gc-ransac", "gair-ransac"]
+    all_results = []
+    all_candidates = {algo: [] for algo in algorithms}
+
+    for algo in algorithms:
+        print(f"\n=== {algo} ===")
+        for trial in range(N_TRIALS):
+            seed = int(rng.integers(0, 2**31))
+            result = run_one(points, normals, algo, seed)
+            if result is None:
+                print(f"  trial {trial}: no model found, skipping")
+                continue
+            print(f"  trial {trial} | CD={result['chamfer']:.4f}  HD={result['hausdorff']:.4f}  RT={result['runtime_s']:.1f}s  models={result['n_models']}")
+            all_results.append({"algo": algo, "trial": trial, "seed": seed, **{k: v for k, v in result.items() if k != "models"}})
+            all_candidates[algo].extend(result["models"])
+
+    # summary
+    print("\n=== summary ===")
+    for algo in algorithms:
+        rows = [r for r in all_results if r["algo"] == algo]
+        if not rows:
+            continue
+        for metric in ("chamfer", "hausdorff", "runtime_s"):
+            vals = [r[metric] for r in rows]
+            print(f"  {algo:12s}  {metric}: {np.mean(vals):.4f} +/- {np.std(vals):.4f}")
+
+    # save CSV (trials)
+    csv_path = OUT_DIR / "results_trials.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["algo", "trial", "seed", "chamfer", "hausdorff", "runtime_s", "n_models"])
+        writer.writeheader()
+        writer.writerows(all_results)
+    print(f"\nTrial results saved to {csv_path}")
+
+    # ── set-cover on all collected candidates ─────────────────────────────────
+    print(f"\n=== set-cover (k_max={K}) ===")
+    cover_results = []
+    for algo in algorithms:
+        candidates = all_candidates[algo]
+        if not candidates:
+            print(f"  {algo}: no candidates, skipping")
+            continue
+        print(f"\n  {algo} — {len(candidates)} candidates")
+        selected_idx = exhaustive_best_cover(candidates, points, k_max=K)
+        selected_models = [candidates[i] for i in selected_idx]
+
+        meshes = [supmesh.superquadric_mesh(m) for m in selected_models]
+        sampled_est, _ = samp.sampling_sq_random(meshes, n_points=4000, seed=EVAL_SEED)
+        est_pts = np.vstack(sampled_est)
+
+        cd = chamfer_distance(points, est_pts)
+        tree_est = cKDTree(est_pts)
+        tree_inp = cKDTree(points)
+        hd = max(tree_est.query(points, k=1)[0].max(),
+                 tree_inp.query(est_pts, k=1)[0].max())
+        union_mask = np.zeros(len(points), dtype=bool)
+        for m in selected_models:
+            residuals = np.abs(supres.superquadric_radial_residual(m, points))
+            union_mask |= (residuals < THRESHOLD)
+        accuracy = float(union_mask.sum()) / len(points)
+
+        print(f"  {algo} | k={len(selected_models)}  CD={cd:.4f}  HD={hd:.4f}  ACC={accuracy:.3f}")
+        cover_results.append({"algo": algo, "k": len(selected_models), "chamfer": round(cd, 6), "hausdorff": round(hd, 6), "accuracy": round(accuracy, 6), "n_candidates": len(candidates)})
+
+        colors = [PALETTE[i % len(PALETTE)] for i in range(len(meshes))]
+        save_screenshots(f"{algo}_k{len(selected_models)}", meshes, points, colors)
+
+        if VISUALIZE:
+            vis.show_mesh_and_points(meshes, pts=points, point_size=5, colors=colors, models=selected_models)
+
+    csv_cover = OUT_DIR / "results_setcover.csv"
+    with open(csv_cover, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["algo", "k", "chamfer", "hausdorff", "accuracy", "n_candidates"])
+        writer.writeheader()
+        writer.writerows(cover_results)
+    print(f"Set-cover results saved to {csv_cover}")
 
 
 if __name__ == "__main__":
