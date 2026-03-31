@@ -8,7 +8,12 @@ from .consensus import compute_consensus, expanded_removal_mask
 from .inner_ransac import inner_ransac, fit_superquadric_ls
 from .gair import gair
 from .initgraph import build_radius_graph
-from .mss import spatial_walk_mss , adaptive_local_fps_mss, uniform_partition_mss
+from .mss import (
+    spatial_walk_mss,
+    adaptive_local_fps_mss,
+    uniform_partition_mss,
+    build_adaptive_local_fps_sampler_context,
+)
 from .inner_ransac import InnerRansacResult
 from numpy.typing import NDArray
 
@@ -86,6 +91,10 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
         # SETTARE A TRUE PER I TEST CON TUTTA POINT CLOUD---------------------------
         use_full_cloud_hypothesis = False
         n_hypotheses = 1 if use_full_cloud_hypothesis else max_iterations
+        # Reuse the local-sampler KD-tree and scale across all hypotheses on this residual.
+        sampler_context = None
+        if not use_full_cloud_hypothesis:
+            sampler_context = build_adaptive_local_fps_sampler_context(current_point_cloud, V)
         # Main RANSAC loop over m hypotheses-------------EXTERNAL RANSAC----------------
         best_mss_used: FloatArray | None = None
         for j in range(n_hypotheses):
@@ -102,16 +111,19 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                         candidate_multiplier=20.0,
                         initial_k=512,
                         rng=rng,
+                        sampler_context=sampler_context,
                     ),
                     dtype=np.float64,
                 )
+                """
             save_point_cloud_inlier_view(
                 current_point_cloud,
                 _point_subset_mask(current_point_cloud, M_j),
                 IMAGES_DIR / f"gair_ransac_model_{k + 1:02d}_hyp_{j + 1:03d}_mss.png",
             )
+            """
             try:
-                H_j: SuperQuadricParams = fit_superquadric_ls(M_j, error_metric="first_order")
+                H_j: SuperQuadricParams = fit_superquadric_ls(M_j, error_metric=error_metric)
             except Exception:
                 continue
             # Compute the standard consensus set of the candidate model
@@ -154,11 +166,13 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     dtype=bool,
                 )
                 local_iteration += 1
+                """
                 save_point_cloud_inlier_view(
                     current_point_cloud,
                     refined_inliers,
                     IMAGES_DIR / f"gair_ransac_model_{k + 1:02d}_hyp_{j + 1:03d}_gair_{local_iteration:02d}.png",
                 )
+                """
                 refined_count: int = int(np.count_nonzero(refined_inliers))
                 # Stop if the refined set is too small
                 if refined_count < min_inliers:

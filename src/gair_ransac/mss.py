@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import numpy as np
 from scipy.spatial import KDTree, cKDTree
 import pyvista as pv
@@ -15,6 +16,55 @@ _PTS_PER_PATCH = 3
 # Voxel side = median NN-spacing × this factor (spatial_walk_mss only).
 # Really important, you can choose how big the single voxel cell is
 _VOXEL_SPACING_FACTOR = 40
+
+
+@dataclass(frozen=True)
+class AdaptiveLocalFpsSamplerContext:
+    data: np.ndarray
+    points: np.ndarray
+    normals: np.ndarray | None
+    tree: cKDTree
+    base_scale: float
+
+
+def _normalize_normals(
+    normals: np.ndarray | None,
+    points_shape: tuple[int, ...],
+) -> np.ndarray | None:
+    if normals is None:
+        return None
+
+    normals_arr = np.asarray(normals, dtype=np.float64)
+    if normals_arr.shape != points_shape:
+        raise ValueError(f"normals must have shape {points_shape}, got {normals_arr.shape}")
+    return normals_arr / (np.linalg.norm(normals_arr, axis=1, keepdims=True) + 1e-12)
+
+
+def build_adaptive_local_fps_sampler_context(
+    D: np.ndarray,
+    normals: np.ndarray | None = None,
+) -> AdaptiveLocalFpsSamplerContext:
+    data = np.asarray(D)
+    points = np.asarray(D, dtype=np.float64)
+    normals_arr = _normalize_normals(normals, points.shape)
+    tree = cKDTree(points)
+
+    # Reuse the median nearest-neighbor spacing as a scale for sample compactness.
+    n_points = int(points.shape[0])
+    if n_points <= 1:
+        base_scale = 1e-9
+    else:
+        nn_dists, _ = tree.query(points, k=2)
+        nn_dists = np.asarray(nn_dists, dtype=np.float64)
+        base_scale = max(float(np.median(nn_dists[:, 1])), 1e-9)
+
+    return AdaptiveLocalFpsSamplerContext(
+        data=data,
+        points=points,
+        normals=normals_arr,
+        tree=tree,
+        base_scale=base_scale,
+    )
 
 # this function is used to spread the sample inside the local pool
 def _farthest_point_indices(
@@ -135,6 +185,7 @@ def adaptive_local_fps_mss(
     tangent_cos_max: float = 0.55,
     rng: np.random.Generator | None = None,
     random_seed: int | None = None,
+    sampler_context: AdaptiveLocalFpsSamplerContext | None = None,
 ) -> np.ndarray:
     """
     Robust local MSS for detached, touching, and mildly overlapping shapes.
@@ -151,36 +202,20 @@ def adaptive_local_fps_mss(
     if rng is None:
         rng = np.random.default_rng(random_seed)
 
-    N = len(D)
+    context = sampler_context if sampler_context is not None else build_adaptive_local_fps_sampler_context(D, normals)
+    data = context.data
+    points = context.points
+    normals_arr = context.normals
+    tree = context.tree
+    base_scale = context.base_scale
+    N = int(points.shape[0])
 
     if primitive_type in _CLOSED_FORM_SIZES:
         k = _CLOSED_FORM_SIZES[primitive_type]
-        return D[rng.choice(N, size=min(k, N), replace=False)]
+        return data[rng.choice(N, size=min(k, N), replace=False)]
 
     if N <= sample_size:
-        return D.copy()
-
-    data = np.asarray(D)
-    points = np.asarray(D, dtype=np.float64)
-
-    normals_arr: np.ndarray | None = None
-    if normals is not None:
-        normals_arr = np.asarray(normals, dtype=np.float64)
-        if normals_arr.shape != points.shape:
-            raise ValueError(f"normals must have shape {points.shape}, got {normals_arr.shape}")
-        normals_arr = normals_arr / (np.linalg.norm(normals_arr, axis=1, keepdims=True) + 1e-12)
-
-    tree = cKDTree(points)
-    # 1 is self, 2 is nearest neighbor, so we take the second column for the median NN distance
-    nn_dists, _ = tree.query(points, k=min(2, N))
-    nn_dists = np.asarray(nn_dists, dtype=np.float64)
-    # The base scale is the median nearest neighbor distance, which normalizes the compactness term in the score to be scale-invariant.
-    #using the median is more robust to outliers than the mean.
-    if nn_dists.ndim == 1:
-        base_scale = float(np.median(nn_dists))
-    else:
-        base_scale = float(np.median(nn_dists[:, -1]))
-    base_scale = max(base_scale, 1e-9)
+        return data.copy()
 
     target_pool_size = min(N, max(sample_size, int(round(candidate_multiplier * sample_size))))
     query_k = min(N, max(initial_k, target_pool_size))

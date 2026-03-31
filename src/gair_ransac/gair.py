@@ -5,7 +5,7 @@ from .consensus import distance_err, normal_alignment_score
 
 # building energy and graph cut
 COH_MIN: float = 0.9
-OUTLIER_SCALE: float = 3.0,
+OUTLIER_SCALE: float = 3.0
 
 
 

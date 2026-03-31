@@ -9,14 +9,17 @@ from src.visualizations import visualization as vis
 from src.superquadrics import superquadric_sampling as samp
 from src.gair_ransac.inner_ransac import inner_ransac, fit_superquadric_ls
 from src.gair_ransac.ransac import ransac
-from point_cloud_utils import k_nearest_neighbors, chamfer_distance
-from scipy.spatial import cKDTree
+from point_cloud_utils import chamfer_distance
 from src.gair_ransac.gair_ransac import gair_ransac
 
 THRESHOLD = 0.1
+NOISE_STD=0.04
 PROJECT_ROOT = Path(__file__).resolve().parent
-PC_FILE = PROJECT_ROOT / "test_objects" / "anthropomorphic_mushroom_character.glb"
-N_POINTS: int | None = None
+"""anthropomorphic_mushroom_character.glb"""
+PC_FILE = PROJECT_ROOT / "test_objects" / "131969.stl"
+# Single knob for how many points are sampled from the input mesh
+# and from the reconstructed superquadrics for evaluation.
+SAMPLED_POINT_COUNT = 20000
 DEFAULT_BASE_SEED = 12345
 
 
@@ -62,6 +65,30 @@ def resolve_input_mesh_path(pc_file: str | Path) -> Path:
     )
 
 
+def sample_input_mesh(
+    mesh: trimesh.Trimesh,
+    n_points: int,
+    seed: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if n_points <= 0:
+        raise ValueError(f"SAMPLED_POINT_COUNT must be positive, got {n_points}")
+
+    sampled_points_list, normals_list = samp.sampling_sq(
+        [mesh],
+        n_points=int(n_points / 2),
+        seed=seed,
+    )
+    noisy_sampled, noisy_normal = samp.sampling_sq_noisy(
+        [mesh],
+        n_points=n_points,
+        noise_std=NOISE_STD,
+        seed=seed,
+    )
+    sampled_points = np.vstack([np.asarray(sampled_points_list[0], dtype=np.float64),np.asarray(noisy_sampled[0], dtype=np.float64),])
+    normals = np.vstack([np.asarray(normals_list[0], dtype=np.float64),np.asarray(noisy_normal[0], dtype=np.float64),])
+    return sampled_points, normals
+
+
 def create_and_estimate_supq(
     pc_file: str | Path = PC_FILE,
     base_seed: int = DEFAULT_BASE_SEED,
@@ -75,17 +102,12 @@ def create_and_estimate_supq(
     else:
         mesh_raw = scene
 
-    if N_POINTS is None:
-        sampled_points = np.asarray(mesh_raw.vertices, dtype=np.float64)
-        normals = np.asarray(mesh_raw.vertex_normals, dtype=np.float64)
-    else:
-        sampled_points, face_idx = trimesh.sample.sample_surface(
-            mesh_raw,
-            N_POINTS,
-            seed=run_seeds.input_sampling,
-        )
-        sampled_points = np.asarray(sampled_points, dtype=np.float64)
-        normals = np.asarray(mesh_raw.face_normals[face_idx], dtype=np.float64)
+    # Always sample the input mesh through the shared sampling utilities module.
+    sampled_points, normals = sample_input_mesh(
+        mesh_raw,
+        n_points=SAMPLED_POINT_COUNT,
+        seed=run_seeds.input_sampling,
+    )
 
     print(f"Loaded {sampled_points.shape[0]} points from {mesh_path.name}")
     print(
@@ -95,6 +117,7 @@ def create_and_estimate_supq(
         f"algorithm={run_seeds.algorithm} "
         f"evaluation_sampling={run_seeds.evaluation_sampling}"
     )
+    print(f"Sampling | sampled_point_count={SAMPLED_POINT_COUNT}")
 
     list_mesh = []
     colors = []
@@ -103,7 +126,7 @@ def create_and_estimate_supq(
     total_best_mss_used = None
 
     algorithm = "gc-ransac"
-    max_models = 1 # <-- how many superquadrics to find
+    max_models = 8 # <-- how many superquadrics to find
 
     if algorithm == "ls":
         small_sample = sampled_points[:30]
@@ -146,7 +169,7 @@ def create_and_estimate_supq(
             normals,
             threshold=THRESHOLD,
             max_models=max_models,
-            max_iterations=2,
+            max_iterations=50,
             inner_iterations=80,
             radius=graph_radius,
             use_normal_coherence=(algorithm == "gair-ransac"),
@@ -178,9 +201,9 @@ def create_and_estimate_supq(
         print(f"Inliers: {n_inliers} | Outliers: {n_outliers} | Total: {len(inlier_mask)} | Outlier ratio: {n_outliers/len(inlier_mask):.2%}")
 
     if list_mesh:
-        sampled_estimated, _ = samp.sampling_sq_random(
+        sampled_estimated, _ = samp.sampling_sq(
             list_mesh,
-            n_points=4000,
+            n_points=SAMPLED_POINT_COUNT,
             seed=run_seeds.evaluation_sampling,
         )
         sample_from_supq_estimated = np.vstack(sampled_estimated)

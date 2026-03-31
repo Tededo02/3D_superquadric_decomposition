@@ -143,4 +143,3 @@ def sampling_outliers(meshes: list[trimesh.Trimesh],n_out: int = 400,margin: flo
         return pts.astype(np.float64),outlier_normals
 
     raise ValueError(f"Unknown mode '{mode}'. Use: 'uniform', 'mog'.")
-
