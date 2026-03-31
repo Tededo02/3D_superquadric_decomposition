@@ -13,12 +13,13 @@ from src.visualizations import visualization as vis
 import numpy as np
 from src.superquadrics import superquadric_sampling as samp
 from src.gair_ransac.inner_ransac import InnerRansacResult, inner_ransac, fit_superquadric_ls
-from src.gair_ransac.ransac import ransac
+from src.gair_ransac.ransac import ransac as lo_ransac_fn
+from src.gair_ransac.vanilla_ransac import vanilla_ransac
 from point_cloud_utils import k_nearest_neighbors, chamfer_distance
 from scipy.spatial import cKDTree
 from src.gair_ransac.gair_ransac import gair_ransac
 
-ITERATIONS_STEP = 5
+ITERATIONS_STEP = 1
 
 def create_and_estimate_supq():
     gt_params = [
@@ -30,7 +31,7 @@ def create_and_estimate_supq():
     noise_values   = list(np.round(np.arange(0.1, 0.5 + 0.05, 0.05), 2))
     outlier_values = list(range(0, 4001, 1000))
     gt_meshes = [supmesh.superquadric_mesh(p) for p in gt_params]
-    algorithms = ["gair-ransac", "ransac"]
+    algorithms = ["gair-ransac", "gc-ransac", "lo-ransac", "vanilla-ransac"]
 
     # keys: (noise, n_out)
     combo_keys = [(n, o) for n in noise_values for o in outlier_values]
@@ -59,19 +60,33 @@ def create_and_estimate_supq():
                     n_gt = len(list_mesh)
 
                     t_start = time.time()
-                    if algo == "ransac":
-                        graph_radius = 0.08
-                        models, inliers_masks = ransac(sampled_points, threshold=threshold, max_models=len(list_mesh), max_iterations=10, inner_iterations=40, radius=graph_radius, graphcut=True)
+                    if algo == "lo-ransac":
+                        models, inliers_masks = lo_ransac_fn(sampled_points, threshold=threshold, max_models=len(list_mesh), max_iterations=10, inner_iterations=40, radius=graph_radius, graphcut=False)
                         if not models:
-                            raise RuntimeError("ransac did not return any model")
+                            raise RuntimeError("lo-ransac did not return any model")
+                        for model in models:
+                            list_mesh.append(supmesh.superquadric_mesh(model))
+                            colors.append("lightgreen")
+                    elif algo == "gc-ransac":
+                        graph_radius = 0.08
+                        models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=threshold, max_models=len(list_mesh), max_iterations=10, inner_iterations=40, radius=graph_radius, use_normal_coherence=False, consensus_metric="radial")
+                        if not models:
+                            raise RuntimeError("gc-ransac did not return any model")
                         for model in models:
                             list_mesh.append(supmesh.superquadric_mesh(model))
                             colors.append("lightgreen")
                     elif algo == "gair-ransac":
                         graph_radius = 0.08
-                        models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=threshold, max_models=len(list_mesh), max_iterations=10, inner_iterations=40, radius=graph_radius, consensus_metric="radial")
+                        models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=threshold, max_models=len(list_mesh), max_iterations=10, inner_iterations=40, radius=graph_radius, use_normal_coherence=True, consensus_metric="radial")
                         if not models:
                             raise RuntimeError("gair_ransac did not return any model")
+                        for model in models:
+                            list_mesh.append(supmesh.superquadric_mesh(model))
+                            colors.append("lightgreen")
+                    elif algo == "vanilla-ransac":
+                        models, inliers_masks = vanilla_ransac(sampled_points, normals, threshold=threshold, max_models=len(list_mesh), max_iterations=10, consensus_metric="radial")
+                        if not models:
+                            raise RuntimeError("vanilla-ransac did not return any model")
                         for model in models:
                             list_mesh.append(supmesh.superquadric_mesh(model))
                             colors.append("lightgreen")
@@ -145,7 +160,7 @@ def create_and_estimate_supq():
     import matplotlib.pyplot as plt
     output_dir = Path(__file__).resolve().parent / "artifacts" / "4_mega_experiment"
     output_dir.mkdir(parents=True, exist_ok=True)
-    colors_algo = {"gair-ransac": "steelblue", "ransac": "darkorange"}
+    colors_algo = {"gair-ransac": "steelblue", "gc-ransac": "mediumseagreen", "lo-ransac": "darkorange", "vanilla-ransac": "tomato"}
 
     # heatmaps: one per algo per metric
     for metric_name, res in [("chamfer", res_chamfers), ("hausdorff", res_hausdorff), ("accuracy", res_misclassification), ("runtime_s", res_runtime)]:
