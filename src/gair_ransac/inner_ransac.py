@@ -4,10 +4,7 @@ import numpy as np
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from scipy.optimize import least_squares
 from .consensus import compute_consensus
-from src.superquadrics.superquadric_residual import (
-    superquadric_radial_residual_and_jacobian,
-    superquadric_residual_vector,
-)
+from src.superquadrics.superquadric_residual import superquadric_radial_residual_and_jacobian,superquadric_residual_vector
 
 
 @dataclass
