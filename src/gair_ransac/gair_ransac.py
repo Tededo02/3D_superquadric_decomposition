@@ -55,12 +55,16 @@ def _sample_superquadric_surface(model: "SuperQuadricParams", n: int = 1000) -> 
     return (pts @ R.T) + model.t
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True, min_coverage: float = 0.0) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
+def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, threshold: float = 0.1, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, min_coverage: float = 0.0, use_normal_coherence: bool | None = None) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
     total_best_mss_used: FloatArray | None = None
 
-    # Convert inputs to standard float arrays
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
-    normals: FloatArray = np.asarray(normals, dtype=np.float64)
+    # if not explicitly set, derive from whether normals are provided
+    if use_normal_coherence is None:
+        use_normal_coherence = normals is not None
+    # MSS always gets real normals when available (independent of GAIR coherence flag)
+    mss_normals: FloatArray | None = np.asarray(normals, dtype=np.float64) if normals is not None else None
+    normals: FloatArray = np.asarray(normals, dtype=np.float64) if normals is not None else np.zeros((point_cloud.shape[0], 3), dtype=np.float64)
     rng = np.random.default_rng(random_seed)
     # Store total number of points in the original point cloud
     n_points: int = point_cloud.shape[0]
@@ -76,6 +80,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
         # Build the current residual point cloud
         current_point_cloud: FloatArray = point_cloud[remaining_indices]
         V: FloatArray = normals[remaining_indices]
+        V_mss: FloatArray | None = mss_normals[remaining_indices] if mss_normals is not None else None
         # Initialize best-so-far model and inlier set for the current residual
         best_model: Optional[SuperQuadricParams] = None
         best_inliers: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
@@ -96,7 +101,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 M_j = np.asarray(
                     adaptive_local_fps_mss(
                         current_point_cloud,
-                        V,
+                        V_mss,
                         sample_size=sample_size,
                         seed_tries=12,
                         candidate_multiplier=20.0,

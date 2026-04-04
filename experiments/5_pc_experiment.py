@@ -26,7 +26,7 @@ GRAPH_RADIUS = 0.06
 MAX_MODELS = 5
 MAX_ITER   = 5
 INNER_ITER = 100
-N_TRIALS   = 10
+N_TRIALS   = 25
 EVAL_SEED  = 42          # fixed so chamfer is comparable across trials
 OUT_DIR    = ROOT / "experiments" / "artifacts" / "5_pc_experiment"
 # ──────────────────────────────────────────────────────────────────────────────
