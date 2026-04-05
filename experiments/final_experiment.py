@@ -20,14 +20,14 @@ from src.superquadrics import superquadric_sampling as samp
 from src.visualizations import visualization as vis
 
 # ── config ────────────────────────────────────────────────────────────────────
-VISUALIZE  = True   # set to False to skip visualization and run all trials headlessly
+VISUALIZE  = False   # set to False to skip visualization and run all trials headlessly
 PC_DIR     = ROOT / "src" / "point_clouds"
 THRESHOLD  = 0.3
 GRAPH_RADIUS = 0.06
 MAX_MODELS = 3
-MAX_ITER   = 5
+MAX_ITER   = 10
 INNER_ITER = 100
-N_TRIALS   = 3
+N_TRIALS   = 10
 K = 3
 EVAL_SEED  = 42          # fixed so chamfer is comparable across trials
 OUT_DIR    = ROOT / "experiments" / "artifacts" / "final_experiment"

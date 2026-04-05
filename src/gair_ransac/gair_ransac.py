@@ -126,7 +126,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, thre
                     current_point_cloud,
                     threshold,
                     error_metric=consensus_metric,
-                    normals=V,
+                    normals=V if use_normal_coherence else None,
                 ),
                 dtype=bool,
             )
@@ -154,7 +154,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, thre
                         eps=threshold,
                         error_metric=consensus_metric,
                         use_normal_coherence=use_normal_coherence,
-                        use_model_normal_agreement=True,
+                        use_model_normal_agreement=use_normal_coherence,
                     ),
                     dtype=bool,
                 )
@@ -178,7 +178,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, thre
                     refined_set_index,
                     None,
                     threshold,
-                    normals=V,
+                    normals=V if use_normal_coherence else None,
                     error_metric=error_metric,
                     consensus_metric=consensus_metric,
                     n_iters=inner_iterations,
@@ -238,7 +238,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, thre
                         current_point_cloud,
                         threshold,
                         error_metric=consensus_metric,
-                        normals=V,
+                        normals=V if use_normal_coherence else None,
                     ),
                     dtype=bool,
                 )
@@ -283,7 +283,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, thre
             threshold,
             factor=1.3,
             error_metric=consensus_metric,
-            normals=V,
+            normals=V if use_normal_coherence else None,
         )
         remaining_indices = remaining_indices[~remove_mask]
         
