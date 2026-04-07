@@ -3,7 +3,12 @@ import csv
 import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import as_completed
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+import threading
 
 import numpy as np
 import trimesh
@@ -28,6 +33,7 @@ INNER_ITERATIONS = 50
 GRAPH_RADIUS = 0.06
 BASE_SEED = 42
 MAX_MODELS = 5
+PROCESS_WORKERS = 1  # 1 = seriale, intero > 1 = multiprocessing, "max" = tutti i core CPU
 SCENARIO = "multi_model"
 PC_DIR = ROOT / "test_objects"
 OUTPUT_DIR = ROOT / "experiments" / "artifacts" / "figure6_7_multi_model"
@@ -37,6 +43,45 @@ METHODS_BY_BUDGET = {
     500: ["Ransac", "Ransac + LO", "Ransac + GAIR"],
     5000: ["Ransac + LO", "Ransac + GAIR"],
 }
+
+
+@dataclass(frozen=True)
+class DatasetSpec:
+    dataset_idx: int
+    path: str
+    input_file: str
+    dataset_id: str
+    outlier_ratio: float
+    noise_std: float
+    threshold: float
+    point_count: int
+    outlier_count: int
+    gt_inliers_assumed_from_tail: bool
+
+
+@dataclass(frozen=True)
+class RunJob:
+    dataset: DatasetSpec
+    iteration_budget: int
+    methods: tuple[str, ...]
+    run_id: int
+    max_models: int
+
+
+_INNER_RANSAC_COUNTER = threading.local()
+
+
+def _make_counted_inner_ransac(original):
+    def wrapped(*args, **kwargs):
+        if getattr(_INNER_RANSAC_COUNTER, "enabled", False):
+            _INNER_RANSAC_COUNTER.value = getattr(_INNER_RANSAC_COUNTER, "value", 0) + 1
+        return original(*args, **kwargs)
+
+    return wrapped
+
+
+lo_module.inner_ransac = _make_counted_inner_ransac(lo_module.inner_ransac)
+gair_module.inner_ransac = _make_counted_inner_ransac(gair_module.inner_ransac)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -213,20 +258,17 @@ def merge_masks(inlier_masks, n_points):
     return merged
 
 
-def run_with_local_counter(module, fn):
-    original = module.inner_ransac
-    counter = {"value": 0}
-
-    def wrapped(*args, **kwargs):
-        counter["value"] += 1
-        return original(*args, **kwargs)
-
-    module.inner_ransac = wrapped
+@contextmanager
+def count_inner_ransac_calls():
+    previous_enabled = getattr(_INNER_RANSAC_COUNTER, "enabled", False)
+    previous_value = getattr(_INNER_RANSAC_COUNTER, "value", 0)
+    _INNER_RANSAC_COUNTER.enabled = True
+    _INNER_RANSAC_COUNTER.value = 0
     try:
-        result = fn()
+        yield _INNER_RANSAC_COUNTER
     finally:
-        module.inner_ransac = original
-    return result, counter["value"]
+        _INNER_RANSAC_COUNTER.enabled = previous_enabled
+        _INNER_RANSAC_COUNTER.value = previous_value
 
 
 def run_method(method, points, normals, threshold, iteration_budget, seed, max_models):
@@ -244,9 +286,8 @@ def run_method(method, points, normals, threshold, iteration_budget, seed, max_m
         )
         local_steps = 0
     elif method == "Ransac + LO":
-        (models, inlier_masks), local_steps = run_with_local_counter(
-            lo_module,
-            lambda: lo_module.ransac(
+        with count_inner_ransac_calls() as counter:
+            models, inlier_masks = lo_module.ransac(
                 point_cloud=points,
                 threshold=threshold,
                 max_models=max_models,
@@ -255,12 +296,11 @@ def run_method(method, points, normals, threshold, iteration_budget, seed, max_m
                 radius=GRAPH_RADIUS,
                 graphcut=False,
                 random_seed=seed,
-            ),
-        )
+            )
+            local_steps = int(getattr(counter, "value", 0))
     elif method == "Ransac + GAIR":
-        (models, inlier_masks, _), local_steps = run_with_local_counter(
-            gair_module,
-            lambda: gair_module.gair_ransac(
+        with count_inner_ransac_calls() as counter:
+            models, inlier_masks, _ = gair_module.gair_ransac(
                 point_cloud=points,
                 normals=normals,
                 threshold=threshold,
@@ -271,14 +311,131 @@ def run_method(method, points, normals, threshold, iteration_budget, seed, max_m
                 consensus_metric="radial",
                 random_seed=seed,
                 use_normal_coherence=True,
-            ),
-        )
+            )
+            local_steps = int(getattr(counter, "value", 0))
     else:
         raise ValueError(f"Unknown method: {method}")
 
     runtime = time.perf_counter() - start
     predicted_inliers = merge_masks(inlier_masks, points.shape[0])
     return predicted_inliers, runtime, int(local_steps), len(models)
+
+
+def build_dataset_specs(point_cloud_files: list[Path]) -> list[DatasetSpec]:
+    dataset_specs: list[DatasetSpec] = []
+    for dataset_idx, pc_file in enumerate(point_cloud_files):
+        dataset_id, outlier_ratio, noise_std = parse_point_cloud_metadata(pc_file)
+        threshold = get_threshold(noise_std)
+        points, _ = load_point_cloud_with_normals(pc_file)
+        _, n_outliers = infer_ground_truth_inliers(points.shape[0], outlier_ratio)
+        dataset_specs.append(
+            DatasetSpec(
+                dataset_idx=dataset_idx,
+                path=str(pc_file),
+                input_file=pc_file.name,
+                dataset_id=dataset_id,
+                outlier_ratio=outlier_ratio,
+                noise_std=noise_std,
+                threshold=threshold,
+                point_count=int(points.shape[0]),
+                outlier_count=n_outliers,
+                gt_inliers_assumed_from_tail=bool(n_outliers > 0),
+            )
+        )
+    return dataset_specs
+
+
+def build_jobs(dataset_specs: list[DatasetSpec], runs: int, max_models: int) -> list[RunJob]:
+    jobs: list[RunJob] = []
+    for iteration_budget, methods in METHODS_BY_BUDGET.items():
+        for dataset in dataset_specs:
+            for run_id in range(1, runs + 1):
+                jobs.append(
+                    RunJob(
+                        dataset=dataset,
+                        iteration_budget=iteration_budget,
+                        methods=tuple(methods),
+                        run_id=run_id,
+                        max_models=max_models,
+                    )
+                )
+    return jobs
+
+
+def resolve_process_workers() -> int:
+    value = PROCESS_WORKERS
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized == "max":
+            return max(os.cpu_count() or 1, 1)
+        raise ValueError(
+            "PROCESS_WORKERS must be 1, an integer > 1, or 'max'. "
+            f"Got string value {PROCESS_WORKERS!r}."
+        )
+
+    workers = int(value)
+    if workers <= 0:
+        raise ValueError(f"PROCESS_WORKERS must be positive, got {PROCESS_WORKERS!r}")
+    return workers
+
+
+def describe_job(job: RunJob) -> str:
+    return (
+        f"{job.dataset.input_file} | budget={job.iteration_budget} | "
+        f"run={job.run_id:02d}"
+    )
+
+
+def run_job(job: RunJob) -> tuple[list[dict[str, object]], list[str]]:
+    pc_file = Path(job.dataset.path)
+    points, normals = load_point_cloud_with_normals(pc_file)
+    gt_inliers, n_outliers = infer_ground_truth_inliers(points.shape[0], job.dataset.outlier_ratio)
+
+    run_seed = (
+        BASE_SEED
+        + 1_000_000 * job.iteration_budget
+        + 10_000 * job.dataset.dataset_idx
+        + job.run_id
+    )
+
+    rows: list[dict[str, object]] = []
+    logs: list[str] = []
+    for method_idx, method in enumerate(job.methods):
+        method_seed = run_seed + 100_000 * (method_idx + 1)
+        predicted_inliers, runtime, local_steps, n_models = run_method(
+            method,
+            points,
+            normals,
+            job.dataset.threshold,
+            job.iteration_budget,
+            method_seed,
+            job.max_models,
+        )
+        misclassification_error = float(np.mean(predicted_inliers != gt_inliers))
+        rows.append({
+            "scenario": SCENARIO,
+            "iteration_budget": job.iteration_budget,
+            "dataset_id": job.dataset.dataset_id,
+            "input_file": job.dataset.input_file,
+            "run_id": job.run_id,
+            "method": method,
+            "outlier_ratio": job.dataset.outlier_ratio,
+            "outlier_count": n_outliers,
+            "noise_std": job.dataset.noise_std,
+            "threshold": job.dataset.threshold,
+            "point_count": int(points.shape[0]),
+            "misclassification_error": misclassification_error,
+            "execution_time_s": runtime,
+            "local_optimization_steps": local_steps,
+            "n_models": n_models,
+            "gt_inliers_assumed_from_tail": job.dataset.gt_inliers_assumed_from_tail,
+        })
+        logs.append(
+            f"{job.dataset.input_file:20s} | budget={job.iteration_budget:<4d} | "
+            f"run={job.run_id:02d} | {method:14s} | mis={misclassification_error:.4f} | "
+            f"time={runtime:.2f}s | lo={local_steps} | models={n_models}"
+        )
+    return rows, logs
 
 
 def main(argv: list[str] | None = None):
@@ -294,74 +451,44 @@ def main(argv: list[str] | None = None):
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
     point_cloud_files = list_point_cloud_files(args.pc_dir, args.input_files)
+    dataset_specs = build_dataset_specs(point_cloud_files)
+    jobs = build_jobs(dataset_specs, args.runs, args.max_models)
+    process_workers = resolve_process_workers()
     rows = []
 
     print(f"point_cloud_dir = {args.pc_dir.expanduser().resolve()}")
     print(f"found {len(point_cloud_files)} input point cloud(s): {[path.name for path in point_cloud_files]}")
     print(f"runs = {args.runs}")
     print(f"max_models = {args.max_models}")
+    print(f"process_workers = {PROCESS_WORKERS!r} -> resolved_workers = {process_workers}")
     print("ground-truth assumption = outliers, when present, are stored at the end of each .ply")
 
-    for iteration_budget, methods in METHODS_BY_BUDGET.items():
-        print(f"\n=== iteration_budget = {iteration_budget} ===")
+    for dataset in dataset_specs:
+        print(
+            f"dataset = {dataset.input_file} | dataset_id = {dataset.dataset_id} | "
+            f"noise_std = {dataset.noise_std:.4f} | outlier_ratio = {dataset.outlier_ratio:.4f} | "
+            f"points = {dataset.point_count} | threshold = {dataset.threshold:.4f}"
+        )
+    print(f"total_jobs = {len(jobs)}")
 
-        for dataset_idx, pc_file in enumerate(point_cloud_files):
-            dataset_id, outlier_ratio, noise_std = parse_point_cloud_metadata(pc_file)
-            threshold = get_threshold(noise_std)
-            points, normals = load_point_cloud_with_normals(pc_file)
-            gt_inliers, n_outliers = infer_ground_truth_inliers(points.shape[0], outlier_ratio)
-
-            print(
-                f"\npoint_cloud = {pc_file.name} | dataset_id = {dataset_id} | "
-                f"noise_std = {noise_std:.4f} | outlier_ratio = {outlier_ratio:.4f} | "
-                f"points = {points.shape[0]} | threshold = {threshold:.4f}"
-            )
-
-            for run_id in range(1, args.runs + 1):
-                run_seed = (
-                    BASE_SEED
-                    + 1_000_000 * iteration_budget
-                    + 10_000 * dataset_idx
-                    + run_id
-                )
-
-                for method_idx, method in enumerate(methods):
-                    method_seed = run_seed + 100_000 * (method_idx + 1)
-                    predicted_inliers, runtime, local_steps, n_models = run_method(
-                        method,
-                        points,
-                        normals,
-                        threshold,
-                        iteration_budget,
-                        method_seed,
-                        args.max_models,
-                    )
-                    misclassification_error = float(np.mean(predicted_inliers != gt_inliers))
-
-                    print(
-                        f"  run={run_id:02d} | {method:14s} | "
-                        f"mis={misclassification_error:.4f} | time={runtime:.2f}s | "
-                        f"lo={local_steps} | models={n_models}"
-                    )
-
-                    rows.append({
-                        "scenario": SCENARIO,
-                        "iteration_budget": iteration_budget,
-                        "dataset_id": dataset_id,
-                        "input_file": pc_file.name,
-                        "run_id": run_id,
-                        "method": method,
-                        "outlier_ratio": outlier_ratio,
-                        "outlier_count": n_outliers,
-                        "noise_std": noise_std,
-                        "threshold": threshold,
-                        "point_count": int(points.shape[0]),
-                        "misclassification_error": misclassification_error,
-                        "execution_time_s": runtime,
-                        "local_optimization_steps": local_steps,
-                        "n_models": n_models,
-                        "gt_inliers_assumed_from_tail": bool(n_outliers > 0),
-                    })
+    if process_workers == 1:
+        for job in jobs:
+            job_rows, logs = run_job(job)
+            for line in logs:
+                print(line)
+            rows.extend(job_rows)
+    else:
+        with ProcessPoolExecutor(max_workers=process_workers) as executor:
+            futures = {executor.submit(run_job, job): job for job in jobs}
+            for future in as_completed(futures):
+                job = futures[future]
+                try:
+                    job_rows, logs = future.result()
+                except Exception as exc:
+                    raise RuntimeError(f"Job failed: {describe_job(job)}") from exc
+                for line in logs:
+                    print(line)
+                rows.extend(job_rows)
 
     with output_csv.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
