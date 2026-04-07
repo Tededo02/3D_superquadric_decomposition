@@ -34,8 +34,17 @@ def ransac(
     inner_iterations: int = 50,
     random_seed: int | None = None,
     graphcut: bool = True,
+    normals: np.ndarray | None = None,
+    use_normal_guided_mss: bool | None = None,
 ) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
+    provided_normals: FloatArray | None = None
+    if normals is not None:
+        provided_normals = np.asarray(normals, dtype=np.float64)
+        if provided_normals.shape != point_cloud.shape:
+            raise ValueError(
+                f"normals must have shape {point_cloud.shape}, got {provided_normals.shape}"
+            )
     # dummy normals: normal coherence is disabled, but gair still requires shape (N,3)
     dummy_normals: FloatArray = np.zeros((point_cloud.shape[0], 3), dtype=np.float64)
     rng = np.random.default_rng(random_seed)
@@ -59,11 +68,18 @@ def ransac(
             edge: IntArray = np.asarray(edge, dtype=np.int64)
 
         for _ in range(max_iterations):
+            sampler_normals: FloatArray | None = None
+            if use_normal_guided_mss is not None:
+                if use_normal_guided_mss and provided_normals is not None:
+                    sampler_normals = provided_normals[remaining_indices]
+                else:
+                    sampler_normals = None
+
             if graphcut:
                 sample_pts: FloatArray = np.asarray(
                     adaptive_local_fps_mss(
                         current_point_cloud,
-                        normals=None,
+                        normals=sampler_normals,
                         sample_size=sample_size,
                         seed_tries=12,
                         candidate_multiplier=20.0,
@@ -73,8 +89,26 @@ def ransac(
                     dtype=np.float64,
                 )
             else:
-                idx = rng.choice(current_point_cloud.shape[0], size=min(sample_size, current_point_cloud.shape[0]), replace=False)
-                sample_pts: FloatArray = current_point_cloud[idx]
+                if use_normal_guided_mss is None:
+                    idx = rng.choice(
+                        current_point_cloud.shape[0],
+                        size=min(sample_size, current_point_cloud.shape[0]),
+                        replace=False,
+                    )
+                    sample_pts = current_point_cloud[idx]
+                else:
+                    sample_pts = np.asarray(
+                        adaptive_local_fps_mss(
+                            current_point_cloud,
+                            normals=sampler_normals,
+                            sample_size=sample_size,
+                            seed_tries=12,
+                            candidate_multiplier=20.0,
+                            initial_k=512,
+                            rng=rng,
+                        ),
+                        dtype=np.float64,
+                    )
 
             try:
                 H_j: SuperQuadricParams = fit_superquadric_ls(sample_pts, error_metric="first_order")

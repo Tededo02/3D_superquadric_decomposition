@@ -29,7 +29,7 @@ from src.gair_ransac.vanilla_ransac import vanilla_ransac
 RUNS = 10
 THRESHOLD = None
 THRESHOLD_SCALE = 2.5
-INNER_ITERATIONS = 50
+INNER_ITERATIONS = 100
 GRAPH_RADIUS = 0.06
 BASE_SEED = 42
 MAX_MODELS = 5
@@ -40,7 +40,15 @@ OUTPUT_DIR = ROOT / "experiments" / "artifacts" / "figure6_7_multi_model"
 CSV_PATH = OUTPUT_DIR / "results.csv"
 
 METHODS_BY_BUDGET = {
-    500: ["Ransac", "Ransac + LO", "Ransac + GAIR"],
+    500: [
+        "Ransac",
+        "Ransac + LO",
+        "Ransac + GAIR",
+        "Ransac + LO mssNoNormals",
+        "Ransac + GAIR mssNoNormals",
+        "Ransac + GC",
+        "Ransac + GC mssNoNormals",
+    ],
     5000: ["Ransac + LO", "Ransac + GAIR"],
 }
 
@@ -285,7 +293,8 @@ def run_method(method, points, normals, threshold, iteration_budget, seed, max_m
             random_seed=seed,
         )
         local_steps = 0
-    elif method == "Ransac + LO":
+    elif method in {"Ransac + LO", "Ransac + LO mssNoNormals"}:
+        use_normal_guided_mss = method == "Ransac + LO"
         with count_inner_ransac_calls() as counter:
             models, inlier_masks = lo_module.ransac(
                 point_cloud=points,
@@ -295,10 +304,29 @@ def run_method(method, points, normals, threshold, iteration_budget, seed, max_m
                 inner_iterations=INNER_ITERATIONS,
                 radius=GRAPH_RADIUS,
                 graphcut=False,
+                normals=normals,
                 random_seed=seed,
+                use_normal_guided_mss=use_normal_guided_mss,
             )
             local_steps = int(getattr(counter, "value", 0))
-    elif method == "Ransac + GAIR":
+    elif method in {"Ransac + GC", "Ransac + GC mssNoNormals"}:
+        use_normal_guided_mss = method == "Ransac + GC"
+        with count_inner_ransac_calls() as counter:
+            models, inlier_masks = lo_module.ransac(
+                point_cloud=points,
+                threshold=threshold,
+                max_models=max_models,
+                max_iterations=iteration_budget,
+                inner_iterations=INNER_ITERATIONS,
+                radius=GRAPH_RADIUS,
+                graphcut=True,
+                normals=normals,
+                random_seed=seed,
+                use_normal_guided_mss=use_normal_guided_mss,
+            )
+            local_steps = int(getattr(counter, "value", 0))
+    elif method in {"Ransac + GAIR", "Ransac + GAIR mssNoNormals"}:
+        use_normal_guided_mss = method == "Ransac + GAIR"
         with count_inner_ransac_calls() as counter:
             models, inlier_masks, _ = gair_module.gair_ransac(
                 point_cloud=points,
@@ -311,6 +339,7 @@ def run_method(method, points, normals, threshold, iteration_budget, seed, max_m
                 consensus_metric="radial",
                 random_seed=seed,
                 use_normal_coherence=True,
+                use_normal_guided_mss=use_normal_guided_mss,
             )
             local_steps = int(getattr(counter, "value", 0))
     else:
