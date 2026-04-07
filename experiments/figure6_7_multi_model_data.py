@@ -1,3 +1,4 @@
+import argparse
 import csv
 import os
 import sys
@@ -5,6 +6,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import trimesh
 
 ROOT = Path(__file__).resolve().parents[1]
 MPLCONFIGDIR = ROOT / "experiments" / "artifacts" / ".matplotlib"
@@ -17,30 +19,17 @@ if str(ROOT) not in sys.path:
 import src.gair_ransac.gair_ransac as gair_module
 import src.gair_ransac.ransac as lo_module
 from src.gair_ransac.vanilla_ransac import vanilla_ransac
-from src.superquadrics import superquadric_mesh as supmesh
-from src.superquadrics import superquadric_sampling as samp
-from src.superquadrics.superquadric_param import SuperQuadricParams
 
 
-GT_PARAMS = [
-    SuperQuadricParams(9.0, 9.0, 9.0, 3.5, 2.09, [2.0, 2.0, 1.0], [5.0, 5.0, 5.0]),
-    SuperQuadricParams(3.0, 3.0, 3.0, 0.5, 0.9, [2.0, 2.0, 1.0], [-5.0, -5.0, -5.0]),
-    SuperQuadricParams(4.0, 4.0, 4.0, 0.8, 1.1, [1.7, 2.1, 0.9], [13.0, 5.0, 5.0]),
-    SuperQuadricParams(2.5, 2.5, 2.5, 0.7, 1.2, [2.1, 1.9, 0.8], [-10.5, -5.0, -5.0]),
-]
-
-
-OUTLIER_RATIOS = [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40]
 RUNS = 10
-NOISE_STD = 0.20
 THRESHOLD = None
 THRESHOLD_SCALE = 2.5
-N_POINTS_PER_MODEL = 120
 INNER_ITERATIONS = 50
 GRAPH_RADIUS = 0.06
 BASE_SEED = 42
+MAX_MODELS = 5
 SCENARIO = "multi_model"
-DATASET_ID = "sq_multi_01"
+PC_DIR = ROOT / "test_objects"
 OUTPUT_DIR = ROOT / "experiments" / "artifacts" / "figure6_7_multi_model"
 CSV_PATH = OUTPUT_DIR / "results.csv"
 
@@ -50,42 +39,169 @@ METHODS_BY_BUDGET = {
 }
 
 
-GT_MESHES = [supmesh.superquadric_mesh(params) for params in GT_PARAMS]
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "input_files",
+        nargs="*",
+        help=(
+            "Optional point-cloud .ply files to run. "
+            "You can pass bare filenames from --pc-dir or explicit paths."
+        ),
+    )
+    parser.add_argument("--pc-dir", type=Path, default=PC_DIR)
+    parser.add_argument("--output-csv", type=Path, default=CSV_PATH)
+    parser.add_argument("--runs", type=int, default=RUNS)
+    parser.add_argument("--max-models", type=int, default=MAX_MODELS)
+    return parser.parse_args(argv)
 
 
-def get_threshold():
+def get_threshold(noise_std):
     if THRESHOLD is not None:
         return float(THRESHOLD)
-    return max(float(THRESHOLD_SCALE) * float(NOISE_STD), 1e-3)
+    return max(float(THRESHOLD_SCALE) * float(noise_std), 1e-3)
 
 
-def ratio_to_outlier_count(outlier_ratio):
-    n_inliers = len(GT_PARAMS) * N_POINTS_PER_MODEL
-    return int(round(n_inliers * outlier_ratio / (1.0 - outlier_ratio)))
+def normalize_outlier_ratio(value: str) -> float:
+    ratio = float(value)
+    if ratio < 0.0:
+        raise ValueError(f"outlier ratio must be non-negative, got {ratio}")
+    if ratio > 1.0:
+        if ratio <= 100.0:
+            return ratio / 100.0
+        raise ValueError(f"outlier ratio must be in [0, 1] or [0, 100], got {ratio}")
+    return ratio
 
 
-def build_multi_model_cloud(outlier_ratio, seed):
-    n_outliers = ratio_to_outlier_count(outlier_ratio)
-    sampled_points_noisy, normals_noisy = samp.sampling_sq_noisy(
-        GT_MESHES,
-        n_points=N_POINTS_PER_MODEL,
-        noise_std=NOISE_STD,
-        clip_k=3.0,
-        seed=seed,
+def parse_point_cloud_metadata(path: Path) -> tuple[str, float, float]:
+    parts = path.stem.split("_")
+    if len(parts) < 3:
+        raise ValueError(
+            f"Point cloud filename must end with '_<outlier_ratio>_<noise_std>.ply', got {path.name}"
+        )
+
+    dataset_id = "_".join(parts[:-2]).strip()
+    if not dataset_id:
+        raise ValueError(f"Could not infer dataset_id from {path.name}")
+
+    outlier_ratio = normalize_outlier_ratio(parts[-2])
+    noise_std = float(parts[-1])
+    if noise_std < 0.0:
+        raise ValueError(f"noise_std must be non-negative, got {noise_std}")
+
+    return dataset_id, outlier_ratio, noise_std
+
+
+def _load_vertices(path: Path) -> np.ndarray:
+    scene = trimesh.load(str(path))
+    if isinstance(scene, trimesh.Scene):
+        geometry = list(scene.geometry.values())
+        if not geometry:
+            raise ValueError(f"No geometry found in {path}")
+        raw = trimesh.util.concatenate(geometry)
+    else:
+        raw = scene
+    return np.asarray(raw.vertices, dtype=np.float64)
+
+
+def load_point_cloud_with_normals(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    points = _load_vertices(path)
+
+    normals_path = path.parent / f"normals_{path.name}"
+    if normals_path.exists():
+        normals = _load_vertices(normals_path)
+    else:
+        scene = trimesh.load(str(path))
+        if isinstance(scene, trimesh.Scene):
+            geometry = list(scene.geometry.values())
+            if not geometry:
+                raise ValueError(f"No geometry found in {path}")
+            raw = trimesh.util.concatenate(geometry)
+        else:
+            raw = scene
+        normals = np.asarray(getattr(raw, "vertex_normals", []), dtype=np.float64)
+        if normals.shape != points.shape:
+            raise FileNotFoundError(
+                f"No normals file found for {path.name} and embedded normals are unavailable."
+            )
+
+    if points.shape != normals.shape:
+        raise ValueError(
+            f"Points/normals shape mismatch for {path.name}: points={points.shape}, normals={normals.shape}"
+        )
+
+    normal_norm = np.linalg.norm(normals, axis=1, keepdims=True)
+    normals = normals / np.where(normal_norm > 0.0, normal_norm, 1.0)
+    return points, normals
+
+
+def infer_ground_truth_inliers(n_points: int, outlier_ratio: float) -> tuple[np.ndarray, int]:
+    n_outliers = int(round(float(n_points) * float(outlier_ratio)))
+    n_outliers = min(max(n_outliers, 0), n_points)
+
+    gt_inliers = np.ones(n_points, dtype=bool)
+    if n_outliers > 0:
+        # Assumption: when present, outliers are appended at the end of the point cloud.
+        gt_inliers[-n_outliers:] = False
+    return gt_inliers, n_outliers
+
+
+def list_point_cloud_files(pc_dir: Path, requested_files: list[str] | None = None) -> list[Path]:
+    pc_dir = pc_dir.expanduser().resolve()
+    if not pc_dir.exists():
+        raise FileNotFoundError(f"Point cloud directory not found: {pc_dir}")
+
+    available_point_clouds = sorted(
+        path
+        for path in pc_dir.glob("*.ply")
+        if path.is_file() and not path.name.startswith("normals_")
     )
-    sampled_points_outliers, normals_outliers = samp.sampling_outliers(
-        GT_MESHES,
-        n_out=n_outliers,
-        margin=0.10,
-        mode="uniform",
-        seed=seed + 10_000,
-    )
+    if not available_point_clouds:
+        raise FileNotFoundError(f"No point-cloud .ply files found in {pc_dir}")
 
-    points = np.vstack([*sampled_points_noisy, sampled_points_outliers]).astype(np.float64)
-    normals = np.vstack([*normals_noisy, normals_outliers]).astype(np.float64)
-    gt_inliers = np.zeros(points.shape[0], dtype=bool)
-    gt_inliers[: sum(len(chunk) for chunk in sampled_points_noisy)] = True
-    return points, normals, gt_inliers, n_outliers
+    if not requested_files:
+        return available_point_clouds
+
+    by_name = {path.name: path for path in available_point_clouds}
+    selected_files: list[Path] = []
+    missing_files: list[str] = []
+
+    for requested in requested_files:
+        requested_path = Path(requested).expanduser()
+        if not requested_path.is_absolute():
+            if requested_path.parent == Path("."):
+                candidate = by_name.get(requested_path.name)
+                if candidate is None:
+                    candidate = (pc_dir / requested_path.name).resolve()
+            else:
+                candidate = (ROOT / requested_path).resolve()
+        else:
+            candidate = requested_path.resolve()
+
+        if (
+            candidate.exists()
+            and candidate.is_file()
+            and candidate.suffix.lower() == ".ply"
+            and not candidate.name.startswith("normals_")
+        ):
+            selected_files.append(candidate)
+        else:
+            missing_files.append(requested)
+
+    if missing_files:
+        available_names = ", ".join(path.name for path in available_point_clouds)
+        raise FileNotFoundError(
+            "Could not resolve the following point-cloud files: "
+            f"{', '.join(missing_files)}. Available in {pc_dir}: {available_names}"
+        )
+
+    deduped_files: list[Path] = []
+    seen: set[Path] = set()
+    for path in selected_files:
+        if path not in seen:
+            deduped_files.append(path)
+            seen.add(path)
+    return deduped_files
 
 
 def merge_masks(inlier_masks, n_points):
@@ -113,7 +229,7 @@ def run_with_local_counter(module, fn):
     return result, counter["value"]
 
 
-def run_method(method, points, normals, threshold, iteration_budget, seed):
+def run_method(method, points, normals, threshold, iteration_budget, seed, max_models):
     start = time.perf_counter()
 
     if method == "Ransac":
@@ -121,7 +237,7 @@ def run_method(method, points, normals, threshold, iteration_budget, seed):
             points,
             normals,
             threshold=threshold,
-            max_models=len(GT_PARAMS),
+            max_models=max_models,
             max_iterations=iteration_budget,
             consensus_metric="radial",
             random_seed=seed,
@@ -133,7 +249,7 @@ def run_method(method, points, normals, threshold, iteration_budget, seed):
             lambda: lo_module.ransac(
                 point_cloud=points,
                 threshold=threshold,
-                max_models=len(GT_PARAMS),
+                max_models=max_models,
                 max_iterations=iteration_budget,
                 inner_iterations=INNER_ITERATIONS,
                 radius=GRAPH_RADIUS,
@@ -148,7 +264,7 @@ def run_method(method, points, normals, threshold, iteration_budget, seed):
                 point_cloud=points,
                 normals=normals,
                 threshold=threshold,
-                max_models=len(GT_PARAMS),
+                max_models=max_models,
                 max_iterations=iteration_budget,
                 inner_iterations=INNER_ITERATIONS,
                 radius=GRAPH_RADIUS,
@@ -165,26 +281,52 @@ def run_method(method, points, normals, threshold, iteration_budget, seed):
     return predicted_inliers, runtime, int(local_steps), len(models)
 
 
-def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    threshold = get_threshold()
+def main(argv: list[str] | None = None):
+    args = parse_args(argv)
+    if args.runs <= 0:
+        raise ValueError(f"--runs must be positive, got {args.runs}")
+    if args.max_models <= 0:
+        raise ValueError(f"--max-models must be positive, got {args.max_models}")
+
+    output_csv = args.output_csv.expanduser()
+    if not output_csv.is_absolute():
+        output_csv = ROOT / output_csv
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+
+    point_cloud_files = list_point_cloud_files(args.pc_dir, args.input_files)
     rows = []
 
-    print(f"noise_std = {NOISE_STD}")
-    print(f"threshold = {threshold}")
-    print(f"points_per_model = {N_POINTS_PER_MODEL}")
+    print(f"point_cloud_dir = {args.pc_dir.expanduser().resolve()}")
+    print(f"found {len(point_cloud_files)} input point cloud(s): {[path.name for path in point_cloud_files]}")
+    print(f"runs = {args.runs}")
+    print(f"max_models = {args.max_models}")
+    print("ground-truth assumption = outliers, when present, are stored at the end of each .ply")
 
     for iteration_budget, methods in METHODS_BY_BUDGET.items():
         print(f"\n=== iteration_budget = {iteration_budget} ===")
-        for outlier_ratio in OUTLIER_RATIOS:
-            print(f"\noutlier_ratio = {outlier_ratio:.2f}")
 
-            for run_id in range(1, RUNS + 1):
-                cloud_seed = BASE_SEED + run_id + int(round(outlier_ratio * 10_000)) + 1_000_000 * iteration_budget
-                points, normals, gt_inliers, n_outliers = build_multi_model_cloud(outlier_ratio, cloud_seed)
+        for dataset_idx, pc_file in enumerate(point_cloud_files):
+            dataset_id, outlier_ratio, noise_std = parse_point_cloud_metadata(pc_file)
+            threshold = get_threshold(noise_std)
+            points, normals = load_point_cloud_with_normals(pc_file)
+            gt_inliers, n_outliers = infer_ground_truth_inliers(points.shape[0], outlier_ratio)
+
+            print(
+                f"\npoint_cloud = {pc_file.name} | dataset_id = {dataset_id} | "
+                f"noise_std = {noise_std:.4f} | outlier_ratio = {outlier_ratio:.4f} | "
+                f"points = {points.shape[0]} | threshold = {threshold:.4f}"
+            )
+
+            for run_id in range(1, args.runs + 1):
+                run_seed = (
+                    BASE_SEED
+                    + 1_000_000 * iteration_budget
+                    + 10_000 * dataset_idx
+                    + run_id
+                )
 
                 for method_idx, method in enumerate(methods):
-                    method_seed = cloud_seed + 100_000 * (method_idx + 1)
+                    method_seed = run_seed + 100_000 * (method_idx + 1)
                     predicted_inliers, runtime, local_steps, n_models = run_method(
                         method,
                         points,
@@ -192,51 +334,61 @@ def main():
                         threshold,
                         iteration_budget,
                         method_seed,
+                        args.max_models,
                     )
                     misclassification_error = float(np.mean(predicted_inliers != gt_inliers))
 
                     print(
                         f"  run={run_id:02d} | {method:14s} | "
-                        f"mis={misclassification_error:.4f} | time={runtime:.2f}s | lo={local_steps}"
+                        f"mis={misclassification_error:.4f} | time={runtime:.2f}s | "
+                        f"lo={local_steps} | models={n_models}"
                     )
 
                     rows.append({
                         "scenario": SCENARIO,
                         "iteration_budget": iteration_budget,
-                        "dataset_id": DATASET_ID,
+                        "dataset_id": dataset_id,
+                        "input_file": pc_file.name,
                         "run_id": run_id,
                         "method": method,
                         "outlier_ratio": outlier_ratio,
                         "outlier_count": n_outliers,
-                        "noise_std": NOISE_STD,
+                        "noise_std": noise_std,
+                        "threshold": threshold,
+                        "point_count": int(points.shape[0]),
                         "misclassification_error": misclassification_error,
                         "execution_time_s": runtime,
                         "local_optimization_steps": local_steps,
                         "n_models": n_models,
+                        "gt_inliers_assumed_from_tail": bool(n_outliers > 0),
                     })
 
-    with CSV_PATH.open("w", newline="", encoding="utf-8") as handle:
+    with output_csv.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
             handle,
             fieldnames=[
                 "scenario",
                 "iteration_budget",
                 "dataset_id",
+                "input_file",
                 "run_id",
                 "method",
                 "outlier_ratio",
                 "outlier_count",
                 "noise_std",
+                "threshold",
+                "point_count",
                 "misclassification_error",
                 "execution_time_s",
                 "local_optimization_steps",
                 "n_models",
+                "gt_inliers_assumed_from_tail",
             ],
         )
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\nSaved CSV -> {CSV_PATH}")
+    print(f"\nSaved CSV -> {output_csv}")
     return 0
 
 

@@ -1,19 +1,14 @@
 import csv
 import math
-import os
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from itertools import combinations
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-MPLCONFIGDIR = ROOT / "experiments" / "artifacts" / ".matplotlib"
-MPLCONFIGDIR.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("MPLCONFIGDIR", str(MPLCONFIGDIR))
-
 import numpy as np
+import trimesh
 
+ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -22,91 +17,75 @@ from scipy.spatial import cKDTree
 from src.gair_ransac.gair_ransac import gair_ransac
 from src.superquadrics import superquadric_mesh as supmesh
 from src.superquadrics import superquadric_sampling as samp
-from src.superquadrics.superquadric_param import SuperQuadricParams
-
-GT_PARAMS = [
-    SuperQuadricParams(9.0, 9.0, 9.0, 3.5, 2.09, [2.0, 2.0, 1.0], [5.0, 5.0, 5.0]),
-    SuperQuadricParams(3.0, 3.0, 3.0, 0.5, 0.9, [2.0, 2.0, 1.0], [-5.0, -5.0, -5.0]),
-    SuperQuadricParams(4.0, 4.0, 4.0, 0.8, 1.1, [1.7, 2.1, 0.9], [13.0, 5.0, 5.0]),
-    SuperQuadricParams(2.5, 2.5, 2.5, 0.7, 1.2, [2.1, 1.9, 0.8], [-10.5, -5.0, -5.0]),
-]
+from src.visualizations import visualization as vis
 
 # ── config ────────────────────────────────────────────────────────────────────
 VISUALIZE  = False   # set to False to skip visualization and run all trials headlessly
+PC_DIR     = ROOT / "src" / "point_clouds"
+THRESHOLD  = 0.3
 GRAPH_RADIUS = 0.06
-MAX_MODELS = len(GT_PARAMS)
-MAX_ITER   = 5
+MAX_MODELS = 3
+MAX_ITER   = 10
 INNER_ITER = 100
 N_TRIALS   = 10
-K = 5
-NOISE_STD = 0.2
-THRESHOLD  = 2.5 * NOISE_STD
-SAMPLED_POINT_COUNT = 10
-NOISY_POINTS_PER_MESH = 10000
-REFERENCE_POINTS_PER_MESH = 10
-OUTLIER_COUNT = 2500
-OUTLIER_MARGIN = 0.10
-INPUT_SAMPLING_SEED = 42
+K = 3
 EVAL_SEED  = 42          # fixed so chamfer is comparable across trials
 OUT_DIR    = ROOT / "experiments" / "artifacts" / "final_experiment"
+N_OUTLIERS = 0           # number of random uniform outliers to inject (0 = none)
+NOISE      = 0        # gaussian noise std applied to positions and normals (0.0 = none)
 # ──────────────────────────────────────────────────────────────────────────────
 
-_WORKER_POINTS = None
-_WORKER_NORMALS = None
-_WORKER_REFERENCE_POINTS = None
+
+def corrupt_point_cloud(points, normals, rng):
+    # additive gaussian noise on positions and normals
+    if NOISE > 0.0:
+        points  = points  + rng.normal(0, NOISE, points.shape)
+        normals = normals + rng.normal(0, NOISE, normals.shape)
+        norms = np.linalg.norm(normals, axis=1, keepdims=True)
+        normals = normals / np.where(norms > 0, norms, 1.0)
+
+    # random uniform outliers spanning the bounding box of the cloud
+    if N_OUTLIERS > 0:
+        lo, hi = points.min(axis=0), points.max(axis=0)
+        outlier_pts = rng.uniform(lo, hi, (N_OUTLIERS, 3))
+        outlier_nrm = rng.normal(0, 1, (N_OUTLIERS, 3))
+        outlier_nrm /= np.linalg.norm(outlier_nrm, axis=1, keepdims=True)
+        points  = np.vstack([points,  outlier_pts])
+        normals = np.vstack([normals, outlier_nrm])
+
+    return points, normals
 
 
-def load_point_cloud() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    gt_meshes = [supmesh.superquadric_mesh(p) for p in GT_PARAMS]
-    sampled_points_noisy, normals_sp_noisy = samp.sampling_sq_noisy(
-        gt_meshes,
-        n_points=NOISY_POINTS_PER_MESH,
-        noise_std=NOISE_STD,
-        clip_k=3.0,
-        seed=INPUT_SAMPLING_SEED,
-    )
-    sampled_points_random, _ = samp.sampling_sq_random(
-        gt_meshes,
-        n_points=REFERENCE_POINTS_PER_MESH,
-        seed=INPUT_SAMPLING_SEED,
-    )
-    sampled_points_outliers, normals_sp_outliers = samp.sampling_outliers(
-        gt_meshes,
-        n_out=OUTLIER_COUNT,
-        margin=OUTLIER_MARGIN,
-        mode="uniform",
-        seed=INPUT_SAMPLING_SEED,
-    )
-    sampled_points = np.vstack([*sampled_points_noisy, sampled_points_outliers]).astype(np.float64)
-    normals = np.vstack([*normals_sp_noisy, normals_sp_outliers]).astype(np.float64)
-    reference_points = np.vstack(sampled_points_random).astype(np.float64)
-    return sampled_points, normals, reference_points
+def load_point_cloud(path: Path):
+    scene = trimesh.load(str(path))
+    if isinstance(scene, trimesh.Scene):
+        mesh_raw = trimesh.util.concatenate(list(scene.geometry.values()))
+    else:
+        mesh_raw = scene
+
+    points = np.asarray(mesh_raw.vertices, dtype=np.float64)
+
+    if isinstance(mesh_raw, trimesh.PointCloud):
+        normals_path = path.parent / f"normals_{path.name}"
+        if not normals_path.exists():
+            raise FileNotFoundError(f"No normals file found for {path.name} (expected {normals_path.name})")
+        normals = np.asarray(trimesh.load(str(normals_path)).vertices, dtype=np.float64)
+    else:
+        normals = np.asarray(mesh_raw.vertex_normals, dtype=np.float64)
+
+    return points, normals
 
 
-def show_mesh_and_points(*args, **kwargs):
-    from src.visualizations import visualization as vis
-
-    vis.show_mesh_and_points(*args, **kwargs)
-
-
-def run_one(
-    points: np.ndarray,
-    normals: np.ndarray,
-    reference_points: np.ndarray | None,
-    algorithm: str,
-    seed: int,
-):
+def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int):
     t0 = time.perf_counter()
-    use_normal_coherence = (algorithm == "gair-ransac")
     models, inliers_masks, _ = gair_ransac(
         points,
-        normals,
+        normals if algorithm == "gair-ransac" else None,
         threshold=THRESHOLD,
         max_models=MAX_MODELS,
         max_iterations=MAX_ITER,
         inner_iterations=INNER_ITER,
         radius=GRAPH_RADIUS,
-        use_normal_coherence=use_normal_coherence,
         min_coverage=0.4,
         random_seed=seed,
     )
@@ -116,16 +95,18 @@ def run_one(
         return None
 
     meshes = [supmesh.superquadric_mesh(m) for m in models]
-    sampled_est, _ = samp.sampling_sq(meshes, n_points=SAMPLED_POINT_COUNT, seed=EVAL_SEED)
+    sampled_est, _ = samp.sampling_sq_random(meshes, n_points=4000, seed=EVAL_SEED)
     est_pts = np.vstack(sampled_est)
-    metric_points = points if reference_points is None else reference_points
 
-    cd = chamfer_distance(metric_points, est_pts)
+    cd = chamfer_distance(clean_points, est_pts)
 
     tree_est = cKDTree(est_pts)
-    tree_inp = cKDTree(metric_points)
-    hd = max(tree_est.query(metric_points, k=1)[0].max(),
-             tree_inp.query(est_pts, k=1)[0].max())
+    tree_inp = cKDTree(clean_points)
+    d_inp_to_est = tree_est.query(clean_points, k=1)[0]   # each input pt → nearest estimated pt
+    d_est_to_inp = tree_inp.query(est_pts,      k=1)[0]   # each estimated pt → nearest input pt
+    cd_coverage = float(d_inp_to_est.mean())               # coverage:  did estimate cover the shape?
+    cd_accuracy = float(d_est_to_inp.mean())               # accuracy:  are superquadrics on the surface?
+    hd = max(d_inp_to_est.max(), d_est_to_inp.max())
 
     palette = ["lightgreen", "orange", "violet", "cyan", "yellow", "red", "lime", "pink", "gold", "turquoise"]
     colors = [palette[i % len(palette)] for i in range(len(meshes))]
@@ -134,102 +115,49 @@ def run_one(
         inlier_mask = inliers_masks[0].copy()
         for mask in inliers_masks[1:]:
             inlier_mask |= mask
+    if inlier_mask is not None:
+        true_inliers_correct  = int(inlier_mask[:n_clean].sum())        # clean pts correctly called inlier
+        true_outliers_correct = int((~inlier_mask[n_clean:]).sum())     # injected pts correctly called outlier
+        correctly_classified  = true_inliers_correct + true_outliers_correct
+        classification_rate   = correctly_classified / len(points)
+    else:
+        correctly_classified = 0
+        classification_rate  = 0.0
+    print(f"    correctly_classified={correctly_classified}/{len(points)}  ({classification_rate*100:.1f}%)")
     if VISUALIZE:
-        show_mesh_and_points(meshes, pts=points, point_size=5, colors=colors, inlier_mask=inlier_mask, models=models)
+        vis.show_mesh_and_points(meshes, pts=points, point_size=5, colors=colors, inlier_mask=inlier_mask, models=models)
 
-    return {"chamfer": cd, "hausdorff": hd, "runtime_s": runtime, "n_models": len(models), "models": models}
-
-
-def _init_trial_worker(points, normals, reference_points):
-    global _WORKER_POINTS, _WORKER_NORMALS, _WORKER_REFERENCE_POINTS
-    _WORKER_POINTS = points
-    _WORKER_NORMALS = normals
-    _WORKER_REFERENCE_POINTS = reference_points
+    return {"chamfer": cd, "cd_coverage": cd_coverage, "cd_accuracy": cd_accuracy, "hausdorff": hd, "classification_rate": classification_rate, "runtime_s": runtime, "n_models": len(models), "models": models}
 
 
-def _run_trial_job(job):
-    algorithm, trial, seed = job
-    if _WORKER_POINTS is None or _WORKER_NORMALS is None:
-        raise RuntimeError("trial worker not initialized")
-    return trial, seed, run_one(_WORKER_POINTS, _WORKER_NORMALS, _WORKER_REFERENCE_POINTS, algorithm, seed)
+def run_for_pc(pc_file: Path, rng):
+    print(f"\n{'='*60}")
+    print(f"Point cloud: {pc_file.name}")
+    print(f"{'='*60}")
+    points, normals = load_point_cloud(pc_file)
+    print(f"  {points.shape[0]} points loaded")
+    clean_points = points.copy()
+    n_clean = len(points)
+    points, normals = corrupt_point_cloud(points, normals, rng)
+    if N_OUTLIERS > 0 or NOISE > 0.0:
+        print(f"  after corruption: {points.shape[0]} points (noise={NOISE}, outliers={N_OUTLIERS})")
 
+    pc_out_dir = OUT_DIR / pc_file.stem
+    pc_out_dir.mkdir(parents=True, exist_ok=True)
 
-def _print_trial_result(trial: int, result):
-    if result is None:
-        print(f"  trial {trial}: no model found, skipping")
-        return
-    print(
-        f"  trial {trial} | CD={result['chamfer']:.4f}  HD={result['hausdorff']:.4f}  "
-        f"RT={result['runtime_s']:.1f}s  models={result['n_models']}"
-    )
-
-
-def run_trials(
-    points: np.ndarray,
-    normals: np.ndarray,
-    reference_points: np.ndarray | None,
-    algorithm: str,
-    n_trials: int,
-    rng: np.random.Generator,
-):
-    seeds = [int(rng.integers(0, 2**31)) for _ in range(n_trials)]
-    max_workers = min(n_trials, os.cpu_count() or 1)
-
-    if VISUALIZE or max_workers <= 1:
-        ordered_results = []
-        for trial, seed in enumerate(seeds):
-            result = run_one(points, normals, reference_points, algorithm, seed)
-            _print_trial_result(trial, result)
-            ordered_results.append((trial, seed, result))
-        return ordered_results
-
-    ordered_results = {}
-    with ProcessPoolExecutor(
-        max_workers=max_workers,
-        initializer=_init_trial_worker,
-        initargs=(points, normals, reference_points),
-    ) as executor:
-        future_to_trial = {
-            executor.submit(_run_trial_job, (algorithm, trial, seed)): trial
-            for trial, seed in enumerate(seeds)
-        }
-        for future in as_completed(future_to_trial):
-            trial = future_to_trial[future]
-            try:
-                completed_trial, seed, result = future.result()
-            except Exception as exc:
-                raise RuntimeError(f"{algorithm} trial {trial} failed") from exc
-            _print_trial_result(completed_trial, result)
-            ordered_results[completed_trial] = (seed, result)
-
-    return [(trial, *ordered_results[trial]) for trial in range(n_trials)]
-
-
-def main():
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    print("Generating synthetic point cloud from superquadrics ...")
-    points, normals, reference_points = load_point_cloud()
-    print(f"  scene superquadrics: {len(GT_PARAMS)}")
-    print(f"  fitting points: {points.shape[0]}")
-    print(f"  reference points: {reference_points.shape[0]}")
-
-    rng = np.random.default_rng()
-    algorithms = ["gair-ransac","gc-ransac"]
+    algorithms = ["gair-ransac", "gc-ransac"]
     all_results = []
     all_candidates = {algo: [] for algo in algorithms}
-    max_workers = min(N_TRIALS, os.cpu_count() or 1)
-
-    if VISUALIZE:
-        print("Visualization enabled: running trials sequentially")
-    elif max_workers > 1:
-        print(f"Running {N_TRIALS} trials in parallel with up to {max_workers} workers per algorithm")
 
     for algo in algorithms:
         print(f"\n=== {algo} ===")
-        ordered_trials = run_trials(points, normals, reference_points, algo, N_TRIALS, rng)
-        for trial, seed, result in ordered_trials:
+        for trial in range(N_TRIALS):
+            seed = int(rng.integers(0, 2**31))
+            result = run_one(points, normals, clean_points, n_clean, algo, seed)
             if result is None:
+                print(f"  trial {trial}: no model found, skipping")
                 continue
+            print(f"  trial {trial} | CD={result['chamfer']:.4f}  CD_COV={result['cd_coverage']:.4f}  CD_ACC={result['cd_accuracy']:.4f}  HD={result['hausdorff']:.4f}  CLF={result['classification_rate']:.3f}  RT={result['runtime_s']:.1f}s  models={result['n_models']}")
             all_results.append({"algo": algo, "trial": trial, "seed": seed, **{k: v for k, v in result.items() if k != "models"}})
             all_candidates[algo].extend(result["models"])
 
@@ -239,18 +167,18 @@ def main():
         rows = [r for r in all_results if r["algo"] == algo]
         if not rows:
             continue
-        for metric in ("chamfer", "hausdorff", "runtime_s"):
+        for metric in ("chamfer", "cd_coverage", "cd_accuracy", "hausdorff", "classification_rate", "runtime_s"):
             vals = [r[metric] for r in rows]
             print(f"  {algo:12s}  {metric}: {np.mean(vals):.4f} +/- {np.std(vals):.4f}")
 
     # save csv
-    csv_path = OUT_DIR / "results_sequential.csv"
+    csv_path = pc_out_dir / "results_sequential.csv"
     with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["algo", "trial", "seed", "chamfer", "hausdorff", "runtime_s", "n_models"])
+        writer = csv.DictWriter(f, fieldnames=["algo", "trial", "seed", "chamfer", "cd_coverage", "cd_accuracy", "hausdorff", "classification_rate", "runtime_s", "n_models"])
         writer.writeheader()
         writer.writerows(all_results)
     print(f"\nResults saved to {csv_path}")
-"""
+
     # ── set-cover ─────────────────────────────────────────────────────────────
     print(f"\n=== set-cover (k_max={K}) ===")
     cover_results = []
@@ -260,38 +188,54 @@ def main():
             print(f"  {algo}: no candidates, skipping")
             continue
         print(f"\n  {algo} — {len(candidates)} candidates")
-        selected_idx = exhaustive_best_cover(candidates, points, k_max=K)
+        selected_idx = exhaustive_best_cover(candidates, clean_points, k_max=K)
         selected_models = [candidates[i] for i in selected_idx]
 
         meshes = [supmesh.superquadric_mesh(m) for m in selected_models]
-        sampled_est, _ = samp.sampling_sq(meshes, n_points=SAMPLED_POINT_COUNT, seed=EVAL_SEED)
+        sampled_est, _ = samp.sampling_sq_random(meshes, n_points=4000, seed=EVAL_SEED)
         est_pts = np.vstack(sampled_est)
 
-        cd = chamfer_distance(points, est_pts)
+        cd = chamfer_distance(clean_points, est_pts)
         tree_est = cKDTree(est_pts)
-        tree_inp = cKDTree(points)
-        hd = max(tree_est.query(points, k=1)[0].max(),
-                 tree_inp.query(est_pts, k=1)[0].max())
+        tree_inp = cKDTree(clean_points)
+        d_inp_to_est = tree_est.query(clean_points, k=1)[0]
+        d_est_to_inp = tree_inp.query(est_pts,      k=1)[0]
+        cd_coverage = float(d_inp_to_est.mean())
+        cd_accuracy = float(d_est_to_inp.mean())
+        hd = max(d_inp_to_est.max(), d_est_to_inp.max())
 
-        print(f"  {algo} | k={len(selected_models)}  CD={cd:.4f}  HD={hd:.4f}")
-        cover_results.append({"algo": algo, "k": len(selected_models), "chamfer": round(cd, 6), "hausdorff": round(hd, 6), "n_candidates": len(candidates)})
+        print(f"  {algo} | k={len(selected_models)}  CD={cd:.4f}  COV={cd_coverage:.4f}  ACC={cd_accuracy:.4f}  HD={hd:.4f}")
+        cover_results.append({"algo": algo, "k": len(selected_models), "chamfer": round(cd, 6), "cd_coverage": round(cd_coverage, 6), "cd_accuracy": round(cd_accuracy, 6), "hausdorff": round(hd, 6), "n_candidates": len(candidates)})
 
         if VISUALIZE:
             palette = ["lightgreen", "orange", "violet", "cyan", "yellow", "red", "lime", "pink", "gold", "turquoise"]
             colors = [palette[i % len(palette)] for i in range(len(meshes))]
-            show_mesh_and_points(meshes, pts=points, point_size=5, colors=colors, models=selected_models)
+            vis.show_mesh_and_points(meshes, pts=points, point_size=5, colors=colors, models=selected_models)
 
-    csv_cover = OUT_DIR / "results_setcover.csv"
+    csv_cover = pc_out_dir / "results_setcover.csv"
     with open(csv_cover, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["algo", "k", "chamfer", "hausdorff", "n_candidates"])
+        writer = csv.DictWriter(f, fieldnames=["algo", "k", "chamfer", "cd_coverage", "cd_accuracy", "hausdorff", "n_candidates"])
         writer.writeheader()
         writer.writerows(cover_results)
     print(f"Set-cover results saved to {csv_cover}")
 
-"""
+
+def main():
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    pc_files = sorted(f for f in PC_DIR.iterdir() if not f.name.startswith("normals_"))
+    if not pc_files:
+        print(f"No files found in {PC_DIR}")
+        return
+    print(f"Found {len(pc_files)} point cloud(s): {[f.name for f in pc_files]}")
+
+    rng = np.random.default_rng()
+    for pc_file in pc_files:
+        run_for_pc(pc_file, rng)
+
+
 def score_combo(combo_indices, candidates, points):
     meshes = [supmesh.superquadric_mesh(candidates[i]) for i in combo_indices]
-    sampled, _ = samp.sampling_sq(meshes, n_points=SAMPLED_POINT_COUNT, seed=EVAL_SEED)
+    sampled, _ = samp.sampling_sq_random(meshes, n_points=4000, seed=EVAL_SEED)
     return chamfer_distance(points, np.vstack(sampled))
 
 

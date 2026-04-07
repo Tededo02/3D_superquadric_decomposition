@@ -43,7 +43,6 @@ def compute_consensus(
 ) -> np.ndarray[bool]:
     err = distance_err(model, points, error_metric=error_metric)
     inliers = err < threshold
-    normals=None
     if normals is not None:
         cos_threshold = DEFAULT_NORMAL_COS_THRESHOLD if normal_cos_threshold is None else float(normal_cos_threshold)
         inliers &= normal_alignment_score(model, points, normals) >= cos_threshold
