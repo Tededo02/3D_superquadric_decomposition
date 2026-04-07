@@ -60,7 +60,7 @@ def _sample_superquadric_surface(model: "SuperQuadricParams", n: int = 1000) -> 
     return (pts @ R.T) + model.t
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True, min_coverage: float = 0.0) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
+def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 15, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True, min_coverage: float = 0.0, use_normal_guided_mss: bool = True) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
     total_best_mss_used: FloatArray | None = None
 
     # Convert inputs to standard float arrays
@@ -92,30 +92,28 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
         use_full_cloud_hypothesis = False
         n_hypotheses = 1 if use_full_cloud_hypothesis else max_iterations
         # Reuse the local-sampler KD-tree and scale across all hypotheses on this residual.
+        mss_normals = V if use_normal_guided_mss else None
         sampler_context = None
         if not use_full_cloud_hypothesis:
-            sampler_context = build_adaptive_local_fps_sampler_context(current_point_cloud, V)
+            sampler_context = build_adaptive_local_fps_sampler_context(current_point_cloud, mss_normals)
         # Main RANSAC loop over m hypotheses-------------EXTERNAL RANSAC----------------
         best_mss_used: FloatArray | None = None
         for j in range(n_hypotheses):
             # Draw a non-minimal sample set and estimate a candidate model
-            if use_full_cloud_hypothesis:
-                M_j: FloatArray = current_point_cloud.copy()
-            else:
-                M_j = np.asarray(
-                    adaptive_local_fps_mss(
-                        current_point_cloud,
-                        V,
-                        sample_size=sample_size,
-                        seed_tries=12,
-                        candidate_multiplier=20.0,
-                        initial_k=512,
-                        rng=rng,
-                        sampler_context=sampler_context,
-                    ),
-                    dtype=np.float64,
-                )
-                """
+            M_j = np.asarray(
+                adaptive_local_fps_mss(
+                    current_point_cloud,
+                    mss_normals,
+                    sample_size=sample_size,
+                    seed_tries=12,
+                    candidate_multiplier=20.0,
+                    initial_k=512,
+                    rng=rng,
+                    sampler_context=sampler_context,
+                ),
+                dtype=np.float64,
+            )
+            """
             save_point_cloud_inlier_view(
                 current_point_cloud,
                 _point_subset_mask(current_point_cloud, M_j),
@@ -203,6 +201,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 # It does not work well. The paper does not use c_hat, but with c_hat
                 # the update is much more stable in this implementation.
                 # from here
+                
                 new_inliers_mask_c_hat: BoolArray = np.asarray(inner_result.best_inliers_mask, dtype=bool)
 
                 if compare_consensus(current_inliers, new_inliers_mask_c_hat, min_gain=min_gain):
@@ -211,10 +210,19 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     current_model = inner_result.best_model
                 else:
                     terminate = True
-
-
                 # The paper does not use c_hat, but with c_hat
                 # to here
+                """
+                if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):
+                    current_inliers = refined_inliers
+                    current_count = int(np.count_nonzero(refined_inliers))
+                    current_model = inner_result.best_model
+                else:
+                    terminate = True
+                """
+
+
+
             # Update the best-so-far solution for the current residual
             if current_count > int(np.count_nonzero(best_inliers)):
                 best_model = current_model
@@ -290,7 +298,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             best_model,
             current_point_cloud,
             threshold,
-            factor=1.3,
+            factor=1.01,
             error_metric=consensus_metric,
             normals=V,
         )

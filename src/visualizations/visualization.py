@@ -13,6 +13,22 @@ DEFAULT_CAMERA_POSITION = [
 ]
 
 
+def _add_meshes_to_plotter(
+    plotter: pv.Plotter,
+    meshes: list,
+    colors: np.ndarray | None = None,
+    opacity: float = 0.65,
+) -> None:
+    for i, mesh in enumerate(meshes):
+        faces = np.hstack([
+            np.full((len(mesh.faces), 1), 3, dtype=np.int64),
+            mesh.faces.astype(np.int64),
+        ]).ravel()
+        poly = pv.PolyData(mesh.vertices, faces)
+        mesh_color = None if colors is None else colors[i]
+        plotter.add_mesh(poly, smooth_shading=True, opacity=opacity, color=mesh_color)
+
+
 def save_point_cloud_inlier_view(
     points: np.ndarray,
     inlier_mask: np.ndarray,
@@ -68,9 +84,6 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
 
 
     # --- aggiungi tutte le mesh ---
-    all_vertices = []
-    total_faces = 0
-    i:int=0
     points = None if pts is None else np.asarray(pts, dtype=np.float64).reshape(-1, 3)
     error_inlier = None
     remaining_mask = None
@@ -100,19 +113,7 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
             )
             remaining_mask[current_indices[remove_mask]] = False
 
-    for mesh in meshes:
-
-        faces = np.hstack([
-            np.full((len(mesh.faces), 1), 3, dtype=np.int64),
-            mesh.faces.astype(np.int64)
-        ]).ravel() 
-        poly = pv.PolyData(mesh.vertices, faces)
-        #lightblue
-        pl.add_mesh(poly, smooth_shading=True, opacity=0.65,color=colors[i])
-
-        all_vertices.append(np.asarray(mesh.vertices))
-        total_faces += len(mesh.faces)
-        i+=1
+    _add_meshes_to_plotter(pl, meshes, colors=colors, opacity=0.65)
 
     # --- punti (se presenti) ---
     n_points_total = 0
@@ -178,4 +179,10 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
     pl.camera_position = DEFAULT_CAMERA_POSITION
 
     pl.show()
-    #print(pl.camera_position)
+
+    mesh_only_plotter = pv.Plotter()
+    mesh_only_plotter.set_background("white")
+    _add_meshes_to_plotter(mesh_only_plotter, meshes, colors=colors, opacity=0.65)
+    mesh_only_plotter.enable_eye_dome_lighting()
+    mesh_only_plotter.camera_position = DEFAULT_CAMERA_POSITION
+    mesh_only_plotter.show()

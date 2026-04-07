@@ -2,7 +2,7 @@ import numpy as np
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from src.superquadrics.superquadric_residual import superquadric_normal_world,superquadric_residual_vector
 
-DEFAULT_NORMAL_COS_THRESHOLD = 0.8
+DEFAULT_NORMAL_COS_THRESHOLD = 0.3
 
 
 def distance_err(
@@ -43,6 +43,7 @@ def compute_consensus(
 ) -> np.ndarray[bool]:
     err = distance_err(model, points, error_metric=error_metric)
     inliers = err < threshold
+    normals=None
     if normals is not None:
         cos_threshold = DEFAULT_NORMAL_COS_THRESHOLD if normal_cos_threshold is None else float(normal_cos_threshold)
         inliers &= normal_alignment_score(model, points, normals) >= cos_threshold
@@ -53,7 +54,7 @@ def expanded_removal_mask(
     model: SuperQuadricParams,
     points: np.ndarray,
     threshold: float,
-    factor: float = 1.5,
+    factor: float = 1.0,
     error_metric: str = "mix",
     normals: np.ndarray | None = None,
     normal_cos_threshold: float | None = None,

@@ -218,9 +218,11 @@ pyproject.toml
 experiments/artifacts/*
 artifacts/*
 test_objects/*
+.matplotlib/
 tests/
 images/
-
+out/
+paper_graph_scripts/
 .gitignore
 .vscode
 .DS_Store
