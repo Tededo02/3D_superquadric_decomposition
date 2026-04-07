@@ -218,16 +218,19 @@ def inner_ransac(
     consensus_metric: str | None = None,
     n_iters: int = 50,
     random_seed: int | None = None,
+    sample_size: int = 30,
 ) -> InnerRansacResult:
     point_array = np.asarray(point_cloud, dtype=np.float64)
     candidate_indices = np.asarray(refined_set_index, dtype=np.int64)
     evaluation_indices = None if actual_set_index is None else np.asarray(actual_set_index, dtype=np.int64)
     evaluation_points = point_array if evaluation_indices is None else point_array[evaluation_indices]
     evaluation_normals = None if normals is None else np.asarray(normals, dtype=np.float64)
+    if sample_size <= 0:
+        raise ValueError(f"sample_size must be positive, got {sample_size}")
 
     # Use the current GAIR set as the reference support for bounded fitting.
     fit_reference_points = point_array[candidate_indices]
-    sampled_point_count = min(candidate_indices.size, 30)
+    sampled_point_count = min(candidate_indices.size, int(sample_size))
     effective_consensus_metric = error_metric if consensus_metric is None else consensus_metric
 
     best_model: Optional[SuperQuadricParams] = None

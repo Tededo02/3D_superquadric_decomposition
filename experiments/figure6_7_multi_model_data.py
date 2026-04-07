@@ -28,8 +28,10 @@ from src.gair_ransac.vanilla_ransac import vanilla_ransac
 
 RUNS = 10
 THRESHOLD = None
-THRESHOLD_SCALE = 2.5
-INNER_ITERATIONS = 100
+# Paper setup: epsilon = 3 * sigma, M_j = 20, inner RANSAC iterations = 50.
+THRESHOLD_SCALE = 3.0
+SAMPLE_SIZE = 20
+INNER_ITERATIONS = 50
 GRAPH_RADIUS = 0.06
 BASE_SEED = 42
 MAX_MODELS = 5
@@ -83,6 +85,7 @@ def _make_counted_inner_ransac(original):
     def wrapped(*args, **kwargs):
         if getattr(_INNER_RANSAC_COUNTER, "enabled", False):
             _INNER_RANSAC_COUNTER.value = getattr(_INNER_RANSAC_COUNTER, "value", 0) + 1
+        kwargs.setdefault("sample_size", SAMPLE_SIZE)
         return original(*args, **kwargs)
 
     return wrapped
@@ -289,6 +292,7 @@ def run_method(method, points, normals, threshold, iteration_budget, seed, max_m
             threshold=threshold,
             max_models=max_models,
             max_iterations=iteration_budget,
+            sample_size=SAMPLE_SIZE,
             consensus_metric="radial",
             random_seed=seed,
         )
@@ -301,6 +305,7 @@ def run_method(method, points, normals, threshold, iteration_budget, seed, max_m
                 threshold=threshold,
                 max_models=max_models,
                 max_iterations=iteration_budget,
+                sample_size=SAMPLE_SIZE,
                 inner_iterations=INNER_ITERATIONS,
                 radius=GRAPH_RADIUS,
                 graphcut=False,
@@ -317,6 +322,7 @@ def run_method(method, points, normals, threshold, iteration_budget, seed, max_m
                 threshold=threshold,
                 max_models=max_models,
                 max_iterations=iteration_budget,
+                sample_size=SAMPLE_SIZE,
                 inner_iterations=INNER_ITERATIONS,
                 radius=GRAPH_RADIUS,
                 graphcut=True,
@@ -334,6 +340,7 @@ def run_method(method, points, normals, threshold, iteration_budget, seed, max_m
                 threshold=threshold,
                 max_models=max_models,
                 max_iterations=iteration_budget,
+                sample_size=SAMPLE_SIZE,
                 inner_iterations=INNER_ITERATIONS,
                 radius=GRAPH_RADIUS,
                 consensus_metric="radial",
@@ -452,7 +459,10 @@ def run_job(job: RunJob) -> tuple[list[dict[str, object]], list[str]]:
             "outlier_count": n_outliers,
             "noise_std": job.dataset.noise_std,
             "threshold": job.dataset.threshold,
+            "threshold_scale": THRESHOLD_SCALE if THRESHOLD is None else "",
             "point_count": int(points.shape[0]),
+            "sample_size": SAMPLE_SIZE,
+            "inner_iterations": INNER_ITERATIONS,
             "misclassification_error": misclassification_error,
             "execution_time_s": runtime,
             "local_optimization_steps": local_steps,
@@ -490,6 +500,11 @@ def main(argv: list[str] | None = None):
     print(f"runs = {args.runs}")
     print(f"max_models = {args.max_models}")
     print(f"process_workers = {PROCESS_WORKERS!r} -> resolved_workers = {process_workers}")
+    print(
+        "paper_params = "
+        f"threshold={'fixed' if THRESHOLD is not None else f'{THRESHOLD_SCALE} * sigma'} | "
+        f"sample_size={SAMPLE_SIZE} | inner_iterations={INNER_ITERATIONS}"
+    )
     print("ground-truth assumption = outliers, when present, are stored at the end of each .ply")
 
     for dataset in dataset_specs:
@@ -533,7 +548,10 @@ def main(argv: list[str] | None = None):
                 "outlier_count",
                 "noise_std",
                 "threshold",
+                "threshold_scale",
                 "point_count",
+                "sample_size",
+                "inner_iterations",
                 "misclassification_error",
                 "execution_time_s",
                 "local_optimization_steps",
