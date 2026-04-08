@@ -26,16 +26,16 @@ import src.gair_ransac.ransac as lo_module
 from src.gair_ransac.vanilla_ransac import vanilla_ransac
 
 
-RUNS = 10
+RUNS = 8
 THRESHOLD = None
 # Paper setup: epsilon = 3 * sigma, M_j = 20, inner RANSAC iterations = 50.
-THRESHOLD_SCALE = 3.0
+THRESHOLD_SCALE = 2.5
 SAMPLE_SIZE = 20
 INNER_ITERATIONS = 50
 GRAPH_RADIUS = 0.06
 BASE_SEED = 42
 MAX_MODELS = 5
-PROCESS_WORKERS = 1  # 1 = seriale, intero > 1 = multiprocessing, "max" = tutti i core CPU
+PROCESS_WORKERS = 4  # 1 = seriale, intero > 1 = multiprocessing, "max" = tutti i core CPU
 SCENARIO = "multi_model"
 PC_DIR = ROOT / "test_objects"
 OUTPUT_DIR = ROOT / "experiments" / "artifacts" / "figure6_7_multi_model"
@@ -46,12 +46,7 @@ METHODS_BY_BUDGET = {
         "Ransac",
         "Ransac + LO",
         "Ransac + GAIR",
-        "Ransac + LO mssNoNormals",
-        "Ransac + GAIR mssNoNormals",
-        "Ransac + GC",
-        "Ransac + GC mssNoNormals",
     ],
-    5000: ["Ransac + LO", "Ransac + GAIR"],
 }
 
 

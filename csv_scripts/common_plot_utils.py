@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 
 plt.rcParams.update({
@@ -83,6 +84,17 @@ def build_method_legend(methods):
     return handles
 
 
+def build_violin_legend(methods):
+    handles = []
+    for method in methods:
+        style = STYLE_MAP[method]
+        handles.append(Line2D([0], [0], color=style["line"], lw=1.0, label=method))
+    for method in methods:
+        style = STYLE_MAP[method]
+        handles.append(Patch(facecolor=style["fill"], alpha=0.30, edgecolor="none", label=f"{method} Violin"))
+    return handles
+
+
 def compute_pareto_front(x_values, y_values):
     points = sorted(zip(x_values, y_values), key=lambda pair: (pair[0], pair[1]))
     frontier = []
@@ -92,6 +104,67 @@ def compute_pareto_front(x_values, y_values):
             frontier.append((x_value, y_value))
             best_y = y_value
     return np.array(frontier, dtype=float)
+
+
+def draw_overlapping_violins(
+    ax,
+    df,
+    metric_column,
+    methods,
+    title,
+    y_label,
+    central="mean",
+    violin_width=0.055,
+    line_width=0.95,
+):
+    x_values = sorted(df["outlier_ratio"].dropna().unique().tolist())
+    if not x_values:
+        return
+
+    for method in methods:
+        style = STYLE_MAP[method]
+        chunks = []
+        positions = []
+        centers = []
+
+        for x_value in x_values:
+            mask = (df["method"] == method) & np.isclose(df["outlier_ratio"], x_value)
+            values = df.loc[mask, metric_column].dropna().to_numpy(dtype=float)
+            if len(values) == 0:
+                continue
+
+            positions.append(float(x_value))
+            chunks.append(values)
+            centers.append(float(np.median(values) if central == "median" else np.mean(values)))
+
+        if not chunks:
+            continue
+
+        violin = ax.violinplot(chunks, positions=positions, widths=violin_width, showextrema=True)
+        for body in violin["bodies"]:
+            body.set_facecolor(style["fill"])
+            body.set_edgecolor("none")
+            body.set_alpha(0.30)
+            body.set_zorder(2)
+        for key in ["cbars", "cmins", "cmaxes"]:
+            violin[key].set_color(style["line"])
+            violin[key].set_linewidth(line_width)
+            violin[key].set_alpha(0.95)
+            violin[key].set_zorder(3)
+
+        ax.plot(positions, centers, color=style["line"], linewidth=line_width, alpha=0.95, zorder=4)
+
+    min_x = float(x_values[0])
+    max_x = float(x_values[-1])
+    margin = 0.05 if max_x - min_x < 0.5 else 0.1 * (max_x - min_x)
+
+    ax.set_xlim(min_x - margin, max_x + margin)
+    ax.set_xticks(x_values)
+    ax.set_xticklabels([f"{value:g}" for value in x_values])
+    ax.set_xlabel("Outlier injection")
+    ax.set_ylabel(y_label)
+    ax.set_title(title)
+    ax.grid(False)
 
 
 def draw_numeric_violins(ax, df, x_col, y_col, methods, x_label, y_label, title, central="mean"):
@@ -170,7 +243,7 @@ def draw_category_violins(ax, df, y_col, methods, y_label, title, central="mean"
     ax.grid(False)
 
 
-def draw_scatter_with_pareto(ax, df, methods, x_col, y_col, x_label, y_label, title):
+def draw_scatter_with_pareto(ax, df, methods, x_col, y_col, x_label, y_label, title, point_size=18):
     for method in methods:
         subset = df[df["method"] == method].dropna(subset=[x_col, y_col])
         if subset.empty:
@@ -179,7 +252,7 @@ def draw_scatter_with_pareto(ax, df, methods, x_col, y_col, x_label, y_label, ti
         style = STYLE_MAP[method]
         x_values = subset[x_col].to_numpy(dtype=float)
         y_values = subset[y_col].to_numpy(dtype=float)
-        ax.scatter(x_values, y_values, color=style["line"], s=18, marker=".", alpha=0.95, label=method, zorder=3)
+        ax.scatter(x_values, y_values, color=style["line"], s=point_size, marker=".", alpha=0.95, label=method, zorder=3)
 
         pareto = compute_pareto_front(x_values, y_values)
         if len(pareto) > 0:
@@ -198,6 +271,26 @@ def draw_scatter_with_pareto(ax, df, methods, x_col, y_col, x_label, y_label, ti
     ax.set_ylabel(y_label)
     ax.set_title(title)
     ax.grid(False)
+
+
+def add_panel_captions(fig, axes, captions, y_offset=0.06):
+    for ax, caption in zip(np.ravel(np.array(axes)), captions):
+        box = ax.get_position()
+        x_center = box.x0 + box.width / 2.0
+        y_position = box.y0 - y_offset
+        fig.text(
+            x_center,
+            y_position,
+            caption,
+            ha="center",
+            va="top",
+            fontsize=10,
+            fontstyle="italic",
+        )
+
+
+def add_figure_caption(fig, caption, y_position=0.02):
+    fig.text(0.5, y_position, caption, ha="center", va="bottom", fontsize=12)
 
 
 def save_figure(fig, output_path, dpi=300):
