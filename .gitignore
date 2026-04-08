@@ -221,6 +221,7 @@ test_objects/*
 .matplotlib/
 tests/
 images/
+finale/
 out/
 paper_graph_scripts/
 .gitignore

@@ -16,14 +16,21 @@ from src.gair_ransac.gair_ransac import gair_ransac
 
 #THRESHOLD = 0.03
 THRESHOLD_FACTOR = 2.5
-NOISE_STD=0.0
+THRESHOLD_SPACING_FACTOR = 0.15
+MIN_THRESHOLD = 1e-3
+MIN_COVERAGE = 0.0
+NOISE_STD = 0.0
 PROJECT_ROOT = Path(__file__).resolve().parent
 """anthropomorphic_mushroom_character.glb"""
 PC_FILE = PROJECT_ROOT / "test_objects" / "cat1_0_0.2.ply"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
 SAMPLED_POINT_COUNT = None 
-DEFAULT_BASE_SEED = 876534 #12345
+DEFAULT_BASE_SEED = 42 #12345
+MIN_SAMPLE_SIZE = 12
+MAX_SAMPLE_SIZE = 20
+MIN_INLIERS_FLOOR = 12
+MAX_INLIERS_CAP = 30
 SUPPORTED_ALGORITHMS = (
     "ls",
     "inner-ransac",
@@ -54,6 +61,20 @@ class LoadedInput:
     gt_outlier_ratio: float | None = None
     gt_noise_std: float | None = None
     gt_inliers_assumed_from_tail: bool = False
+
+
+@dataclass(frozen=True)
+class PointCloudStats:
+    point_count: int
+    spatial_extent: float
+    median_nn_distance: float
+
+
+@dataclass(frozen=True)
+class RansacTuning:
+    sample_size: int
+    min_inliers: int
+    mss_max_pool_fraction: float
 
 
 def _seed_from_sequence(seed_sequence: np.random.SeedSequence) -> int:
@@ -131,8 +152,69 @@ def infer_ground_truth_inliers(
     return gt_inliers, n_outliers
 
 
-def get_threshold(noise_std: float) -> float:
-    return max(float(THRESHOLD_FACTOR) * float(noise_std), 0.3)
+def summarize_point_cloud(points: np.ndarray) -> PointCloudStats:
+    point_array = np.asarray(points, dtype=np.float64)
+    point_count = int(point_array.shape[0])
+    if point_count == 0:
+        return PointCloudStats(point_count=0, spatial_extent=0.0, median_nn_distance=0.0)
+
+    spans = np.ptp(point_array, axis=0)
+    spatial_extent = float(np.linalg.norm(spans))
+    if point_count == 1:
+        return PointCloudStats(
+            point_count=point_count,
+            spatial_extent=spatial_extent,
+            median_nn_distance=0.0,
+        )
+
+    tree = cKDTree(point_array)
+    nn_distances = np.asarray(tree.query(point_array, k=2)[0], dtype=np.float64)
+    median_nn_distance = float(np.median(nn_distances[:, 1]))
+    return PointCloudStats(
+        point_count=point_count,
+        spatial_extent=spatial_extent,
+        median_nn_distance=median_nn_distance,
+    )
+
+
+def tune_ransac_hyperparameters(stats: PointCloudStats) -> RansacTuning:
+    point_count = int(stats.point_count)
+    if point_count <= 0:
+        return RansacTuning(
+            sample_size=0,
+            min_inliers=0,
+            mss_max_pool_fraction=0.25,
+        )
+
+    sample_low = min(MIN_SAMPLE_SIZE, point_count)
+    sample_high = min(MAX_SAMPLE_SIZE, point_count)
+    raw_sample_size = int(round(0.06 * point_count))
+    sample_size = int(np.clip(raw_sample_size, sample_low, sample_high))
+
+    min_inliers_low = min(max(sample_size, MIN_INLIERS_FLOOR), point_count)
+    min_inliers_high = min(MAX_INLIERS_CAP, point_count)
+    raw_min_inliers = int(round(0.15 * point_count))
+    min_inliers = int(np.clip(raw_min_inliers, min_inliers_low, min_inliers_high))
+
+    mss_max_pool_fraction = float(
+        np.clip((6.0 * sample_size) / max(point_count, 1), 0.18, 0.35)
+    )
+    return RansacTuning(
+        sample_size=sample_size,
+        min_inliers=min_inliers,
+        mss_max_pool_fraction=mss_max_pool_fraction,
+    )
+
+
+def get_threshold(
+    noise_std: float,
+    median_nn_distance: float | None = None,
+) -> float:
+    threshold_from_noise = float(THRESHOLD_FACTOR) * float(noise_std)
+    threshold_from_spacing = 0.0
+    if median_nn_distance is not None and median_nn_distance > 0.0:
+        threshold_from_spacing = float(THRESHOLD_SPACING_FACTOR) * float(median_nn_distance)
+    return 0.03#max(threshold_from_noise, threshold_from_spacing, MIN_THRESHOLD)
 
 
 def resolve_input_path(pc_file: str | Path) -> Path:
@@ -285,7 +367,12 @@ def create_and_estimate_supq(
     normals = loaded_input.normals
     gt_inlier_mask = loaded_input.gt_inlier_mask
     algorithm_noise_std = float(loaded_input.noise_std)
-    threshold = get_threshold(algorithm_noise_std)
+    cloud_stats = summarize_point_cloud(sampled_points)
+    threshold = get_threshold(
+        algorithm_noise_std,
+        median_nn_distance=cloud_stats.median_nn_distance,
+    )
+    ransac_tuning = tune_ransac_hyperparameters(cloud_stats)
 
     print(
         f"Loaded {sampled_points.shape[0]} points from {input_path.name} "
@@ -307,11 +394,24 @@ def create_and_estimate_supq(
     else:
         print(f"Sampling | point_cloud_count={sampled_points.shape[0]} (used directly)")
     print(
+        "Point-cloud stats | "
+        f"extent={cloud_stats.spatial_extent:.4f} "
+        f"median_nn={cloud_stats.median_nn_distance:.4f}"
+    )
+    print(
         "Threshold | "
         f"threshold={threshold:.4f} "
         f"noise_std={algorithm_noise_std:.4f} "
         f"threshold_factor={THRESHOLD_FACTOR:.4f} "
+        f"spacing_factor={THRESHOLD_SPACING_FACTOR:.4f} "
         f"source={loaded_input.noise_std_source}"
+    )
+    print(
+        "RANSAC tuning | "
+        f"sample_size={ransac_tuning.sample_size} "
+        f"min_inliers={ransac_tuning.min_inliers} "
+        f"mss_max_pool_fraction={ransac_tuning.mss_max_pool_fraction:.2f} "
+        f"min_coverage={MIN_COVERAGE:.2f}"
     )
     gt_n_inliers = None
     gt_n_outliers = None
@@ -361,6 +461,7 @@ def create_and_estimate_supq(
             actual_set_index=None,
             threshold=threshold,
             random_seed=run_seeds.algorithm,
+            sample_size=ransac_tuning.sample_size,
         )
         models = [theta0.best_model]
         list_mesh.append(supmesh.superquadric_mesh(theta0.best_model))
@@ -376,6 +477,10 @@ def create_and_estimate_supq(
             radius=graph_radius,
             graphcut=True,
             random_seed=run_seeds.algorithm,
+            sample_size=ransac_tuning.sample_size,
+            min_inliers=ransac_tuning.min_inliers,
+            use_normal_guided_mss=True,
+            mss_max_pool_fraction=ransac_tuning.mss_max_pool_fraction,
         )
         if not models:
             raise RuntimeError("ransac did not return any model")
@@ -395,9 +500,13 @@ def create_and_estimate_supq(
             inner_iterations=150,
             radius=graph_radius,
             use_normal_coherence=use_normal_coherence,
-            min_coverage=0.4,
+            min_coverage=MIN_COVERAGE,
             random_seed=run_seeds.algorithm,
             use_normal_guided_mss=use_normal_guided_mss,
+            consensus_metric="radial",
+            sample_size=ransac_tuning.sample_size,
+            min_inliers=ransac_tuning.min_inliers,
+            mss_max_pool_fraction=ransac_tuning.mss_max_pool_fraction,
         )
         if not models:
             raise RuntimeError("gair_ransac did not return any model")

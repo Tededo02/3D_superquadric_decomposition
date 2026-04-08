@@ -36,6 +36,7 @@ def ransac(
     graphcut: bool = True,
     normals: np.ndarray | None = None,
     use_normal_guided_mss: bool | None = None,
+    mss_max_pool_fraction: float | None = 0.25,
 ) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     provided_normals: FloatArray | None = None
@@ -85,6 +86,7 @@ def ransac(
                         candidate_multiplier=20.0,
                         initial_k=512,
                         rng=rng,
+                        max_pool_fraction=mss_max_pool_fraction,
                     ),
                     dtype=np.float64,
                 )
@@ -106,6 +108,7 @@ def ransac(
                             candidate_multiplier=20.0,
                             initial_k=512,
                             rng=rng,
+                            max_pool_fraction=mss_max_pool_fraction,
                         ),
                         dtype=np.float64,
                     )

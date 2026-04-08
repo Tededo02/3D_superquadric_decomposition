@@ -60,7 +60,7 @@ def _sample_superquadric_surface(model: "SuperQuadricParams", n: int = 1000) -> 
     return (pts @ R.T) + model.t
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True, min_coverage: float = 0.0, use_normal_guided_mss: bool = True) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
+def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, use_normal_coherence: bool = True, min_coverage: float = 0.0, use_normal_guided_mss: bool = True, mss_max_pool_fraction: float | None = 0.25) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
     total_best_mss_used: FloatArray | None = None
 
     # Convert inputs to standard float arrays
@@ -110,6 +110,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     initial_k=512,
                     rng=rng,
                     sampler_context=sampler_context,
+                    max_pool_fraction=mss_max_pool_fraction,
                 ),
                 dtype=np.float64,
             )
