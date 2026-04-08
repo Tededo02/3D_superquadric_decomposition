@@ -395,7 +395,7 @@ def create_and_estimate_supq(
             inner_iterations=150,
             radius=graph_radius,
             use_normal_coherence=use_normal_coherence,
-            min_coverage=0.1,
+            min_coverage=0.4,
             random_seed=run_seeds.algorithm,
             use_normal_guided_mss=use_normal_guided_mss,
         )
