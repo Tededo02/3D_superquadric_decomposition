@@ -128,17 +128,17 @@ def parse_point_cloud_metadata(path: Path) -> tuple[str, float, float]:
     parts = path.stem.split("_")
     if len(parts) < 3:
         raise ValueError(
-            f"Point cloud filename must end with '_<outlier_ratio>_<noise_std>.ply', got {path.name}"
+            f"Point cloud filename must end with '_<noise_std>_<outlier_ratio>.ply', got {path.name}"
         )
 
     dataset_id = "_".join(parts[:-2]).strip()
     if not dataset_id:
         raise ValueError(f"Could not infer dataset_id from {path.name}")
 
-    outlier_ratio = normalize_outlier_ratio(parts[-2])
-    noise_std = float(parts[-1])
+    noise_std = float(parts[-2])
     if noise_std < 0.0:
         raise ValueError(f"noise_std must be non-negative, got {noise_std}")
+    outlier_ratio = normalize_outlier_ratio(parts[-1])
 
     return dataset_id, outlier_ratio, noise_std
 

@@ -86,6 +86,11 @@ def run_batch(
                         f"  ok | models={row['n_models']} "
                         f"runtime_s={row['runtime_s']:.3f} "
                         f"chamfer={row['chamfer']:.4f}"
+                        + (
+                            f" mis={row['gt_misclassification_error']:.4f}"
+                            if row["gt_misclassification_error"] is not None
+                            else ""
+                        )
                     )
                 except Exception as exc:
                     row = {
@@ -104,11 +109,20 @@ def run_batch(
                         "sampled_point_count": None,
                         "n_models": None,
                         "runtime_s": None,
+                        "threshold": None,
+                        "input_noise_std": None,
                         "chamfer": None,
                         "one_sided_chamfer": None,
                         "n_inliers": None,
                         "n_outliers": None,
                         "outlier_ratio": None,
+                        "gt_n_inliers": None,
+                        "gt_n_outliers": None,
+                        "gt_outlier_ratio": None,
+                        "gt_noise_std": None,
+                        "gt_classification_rate": None,
+                        "gt_misclassification_error": None,
+                        "gt_inliers_assumed_from_tail": False,
                     }
                     print(f"  error | {exc}")
                 rows.append(row)
@@ -129,11 +143,20 @@ def run_batch(
         "sampled_point_count",
         "n_models",
         "runtime_s",
+        "threshold",
+        "input_noise_std",
         "chamfer",
         "one_sided_chamfer",
         "n_inliers",
         "n_outliers",
         "outlier_ratio",
+        "gt_n_inliers",
+        "gt_n_outliers",
+        "gt_outlier_ratio",
+        "gt_noise_std",
+        "gt_classification_rate",
+        "gt_misclassification_error",
+        "gt_inliers_assumed_from_tail",
     ]
     with output_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
