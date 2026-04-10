@@ -2,6 +2,7 @@ import csv
 import math
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from itertools import combinations
 from pathlib import Path
 
@@ -20,19 +21,19 @@ from src.superquadrics import superquadric_sampling as samp
 from src.visualizations import visualization as vis
 
 # ── config ────────────────────────────────────────────────────────────────────
-VISUALIZE  = False   # set to False to skip visualization and run all trials headlessly
+VISUALIZE  = False   # set to False to ski p visualization and run all trials headlessly
 PC_DIR     = ROOT / "src" / "point_clouds"
 THRESHOLD  = 0.2
 GRAPH_RADIUS = 0.06
-MAX_MODELS = 3
-MAX_ITER   = 10
+MAX_MODELS = 5
+MAX_ITER   = 20
 INNER_ITER = 100
-N_TRIALS   = 10
+N_TRIALS   = 30
 K = 3
 EVAL_SEED  = 42          # fixed so chamfer is comparable across trials
 OUT_DIR    = ROOT / "experiments" / "artifacts" / "final_experiment"
 N_OUTLIERS = 130           # number of random uniform outliers to inject (0 = none)
-NOISE      = 0        # gaussian noise std applied to positions and normals (0.0 = none)
+NOISE      = 0.01        # gaussian noise std applied to positions and normals (0.0 = none)
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -74,6 +75,13 @@ def load_point_cloud(path: Path):
         normals = np.asarray(mesh_raw.vertex_normals, dtype=np.float64)
 
     return points, normals
+
+
+def _run_one_worker(args):
+    """Top-level wrapper so ProcessPoolExecutor can pickle it."""
+    trial, algo, seed, points, normals, clean_points, n_clean = args
+    result = run_one(points, normals, clean_points, n_clean, algo, seed)
+    return trial, algo, seed, result
 
 
 def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int):
@@ -149,18 +157,20 @@ def run_for_pc(pc_file: Path, rng):
     all_results = []
     all_candidates = {algo: [] for algo in algorithms}
 
-    for trial in range(N_TRIALS):
-        seed = int(rng.integers(0, 2**31))
-        print(f"\n{'─'*60}")
-        print(f"Trial {trial}  (seed={seed})")
-        print(f"{'─'*60}")
-        for algo in algorithms:
-            print(f"\n=== {algo} ===")
-            result = run_one(points, normals, clean_points, n_clean, algo, seed)
+    trial_seeds = [int(rng.integers(0, 2**31)) for _ in range(N_TRIALS)]
+    tasks = [
+        (trial, algo, trial_seeds[trial], points, normals, clean_points, n_clean)
+        for trial in range(N_TRIALS)
+        for algo in algorithms
+    ]
+    with ProcessPoolExecutor() as executor:
+        futures = {executor.submit(_run_one_worker, t): t for t in tasks}
+        for future in as_completed(futures):
+            trial, algo, seed, result = future.result()
             if result is None:
-                print(f"  no model found, skipping")
+                print(f"  trial {trial} {algo}: no model found, skipping")
                 continue
-            print(f"  CD={result['chamfer']:.4f}  CD_COV={result['cd_coverage']:.4f}  CD_ACC={result['cd_accuracy']:.4f}  HD={result['hausdorff']:.4f}  CLF={result['classification_rate']:.3f}  RT={result['runtime_s']:.1f}s  models={result['n_models']}")
+            print(f"  trial {trial} {algo}  seed={seed}  CD={result['chamfer']:.4f}  CD_COV={result['cd_coverage']:.4f}  CD_ACC={result['cd_accuracy']:.4f}  HD={result['hausdorff']:.4f}  CLF={result['classification_rate']:.3f}  RT={result['runtime_s']:.1f}s  models={result['n_models']}")
             all_results.append({"algo": algo, "trial": trial, "seed": seed, **{k: v for k, v in result.items() if k != "models"}})
             all_candidates[algo].extend(result["models"])
 

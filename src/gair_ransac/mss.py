@@ -10,11 +10,11 @@ _CLOSED_FORM_SIZES = {
 }
 
 # How many points the algorithm picks for each patch
-_PTS_PER_PATCH = 3
+_PTS_PER_PATCH = 5
 
 # Voxel side = median NN-spacing × this factor (spatial_walk_mss only).
 # Really important, you can choose how big the single voxel cell is
-_VOXEL_SPACING_FACTOR = 40
+_VOXEL_SPACING_FACTOR = 3
 
 # this function is used to spread the sample inside the local pool
 def _farthest_point_indices(
@@ -254,6 +254,7 @@ def spatial_walk_mss(
     sample_size is reached.
 
     """
+    sample_size = 15
     if rng is None:
         rng = np.random.default_rng(random_seed)
 

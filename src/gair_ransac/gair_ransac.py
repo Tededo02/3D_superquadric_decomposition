@@ -57,7 +57,7 @@ def _sample_superquadric_surface(model: "SuperQuadricParams", n: int = 1000) -> 
 
 def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, threshold: float = 0.1, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, min_coverage: float = 0.0, use_normal_coherence: bool | None = None) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
     total_best_mss_used: FloatArray | None = None
-
+    min_inliers = 5
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     # if not explicitly set, derive from whether normals are provided
     if use_normal_coherence is None:
