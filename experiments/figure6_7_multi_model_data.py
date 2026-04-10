@@ -27,24 +27,24 @@ import src.gair_ransac.ransac as lo_module
 from src.gair_ransac.vanilla_ransac import vanilla_ransac
 
 
-RUNS = 1
+RUNS = 20
 THRESHOLD = None
 THRESHOLD_FACTOR = 2.5
-THRESHOLD_SPACING_FACTOR = 0.10
-MIN_THRESHOLD = 0.03
+THRESHOLD_SPACING_FACTOR = 0.09
+MIN_THRESHOLD = 0.02
 MIN_COVERAGE = 0.0
 DEFAULT_NOISE_STD = 0.0
-PLOT_OUTLIER_RATIOS = (0.0,)   #(0.0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4)
-MIN_SAMPLE_SIZE = 12
-MAX_SAMPLE_SIZE = 20
-MIN_INLIERS_FLOOR = 12
-MAX_INLIERS_CAP = 30
+PLOT_OUTLIER_RATIOS = (0.0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4)
+MIN_SAMPLE_SIZE = 11
+MAX_SAMPLE_SIZE = 15
+MIN_INLIERS_FLOOR = 11
+MAX_INLIERS_CAP = 15
 INNER_ITERATIONS = 50
 GRAPH_RADIUS = 0.06
 OUTLIER_MARGIN = 0.10
-BASE_SEED = 42
-MAX_MODELS = 5
-PROCESS_WORKERS = 4 # 1 = seriale, intero > 1 = multiprocessing, "max" = tutti i core CPU
+BASE_SEED = 94737
+MAX_MODELS = 6
+PROCESS_WORKERS = "max" # 1 = seriale, intero > 1 = multiprocessing, "max" = tutti i core CPU
 SCENARIO = "multi_model"
 PC_DIR = ROOT / "test_objects" / "synt_multimodel_valid"
 OUTPUT_DIR = ROOT / "experiments" / "artifacts" / "figure6_7_multi_model"
@@ -55,7 +55,7 @@ OUTLIER_LABEL_VALUE = -1.0
 GT_LABEL_MATCH_ATOL = 1e-12
 
 METHODS_BY_BUDGET = {
-    500: [      #"Ransac","Ransac + LO","Ransac + GC",
+    500: [      "Ransac","Ransac + LO","Ransac + GC",
         "Ransac + GAIR",
     ],
     #5000: ["Ransac + LO","Ransac + GC","Ransac + GAIR",],

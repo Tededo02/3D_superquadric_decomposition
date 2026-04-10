@@ -279,7 +279,7 @@ def inner_ransac(
     actual_set_index: np.ndarray | None,
     threshold: float,
     normals: np.ndarray | None = None,
-    error_metric: str = "mix",
+    error_metric: str = "radial",
     consensus_metric: str | None = None,
     n_iters: int = 50,
     random_seed: int | None = None,

@@ -13,6 +13,35 @@ DEFAULT_CAMERA_POSITION = [
 ]
 
 
+def _focus_camera_on_points(plotter: pv.Plotter, points: np.ndarray) -> None:
+    if points.size == 0:
+        plotter.camera_position = DEFAULT_CAMERA_POSITION
+        return
+
+    mins = points.min(axis=0)
+    maxs = points.max(axis=0)
+    center = (mins + maxs) / 2.0
+
+    default_position = np.asarray(DEFAULT_CAMERA_POSITION[0], dtype=np.float64)
+    default_focal_point = np.asarray(DEFAULT_CAMERA_POSITION[1], dtype=np.float64)
+    default_view_up = tuple(np.asarray(DEFAULT_CAMERA_POSITION[2], dtype=np.float64))
+
+    view_direction = default_position - default_focal_point
+    norm = np.linalg.norm(view_direction)
+    if norm == 0.0:
+        view_direction = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+        norm = 1.0
+
+    plotter.camera_position = [
+        tuple(center + (view_direction / norm)),
+        tuple(center),
+        default_view_up,
+    ]
+    plotter.reset_camera()
+    plotter.camera.zoom(0.95)
+    plotter.reset_camera_clipping_range()
+
+
 def _add_meshes_to_plotter(
     plotter: pv.Plotter,
     meshes: list,
@@ -67,7 +96,7 @@ def save_point_cloud_inlier_view(
         )
 
     pl.enable_eye_dome_lighting()
-    pl.camera_position = DEFAULT_CAMERA_POSITION
+    _focus_camera_on_points(pl, points)
     pl.screenshot(str(image_path))
     pl.close()
     return image_path

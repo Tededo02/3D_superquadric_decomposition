@@ -227,8 +227,8 @@ def adaptive_local_fps_mss(
 
     if N <= sample_size:
         return data.copy()
-
-    target_pool_size = min(N, max(sample_size, int(round(candidate_multiplier * sample_size))))
+    frac_tot = int(N/10)
+    target_pool_size = min(frac_tot, max(sample_size, int(round(candidate_multiplier * sample_size))))
     if max_pool_fraction is not None and max_pool_fraction > 0.0:
         min_local_pool = min(N, max(sample_size + 4, int(round(2.5 * sample_size))))
         fraction_pool_cap = int(np.ceil(float(max_pool_fraction) * N))
