@@ -16,17 +16,18 @@ from src.gair_ransac.gair_ransac import gair_ransac
 
 #THRESHOLD = 0.03
 THRESHOLD_FACTOR = 2.5
-THRESHOLD_SPACING_FACTOR = 0.15
-MIN_THRESHOLD = 1e-3
+THRESHOLD_SPACING_FACTOR = 0.10
+MIN_THRESHOLD = 0.03
 MIN_COVERAGE = 0.0
 NOISE_STD = 0.0
 PROJECT_ROOT = Path(__file__).resolve().parent
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "cat1_0_0.2.ply"
+PC_FILE = PROJECT_ROOT / "test_objects" / "anthropomorphic_mushroom_character.glb"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
-SAMPLED_POINT_COUNT = None 
-DEFAULT_BASE_SEED = 42 #12345
+SAMPLED_POINT_COUNT = 2000
+DEFAULT_BASE_SEED = 59546 #12345
+MAX_MODELS = 2
 MIN_SAMPLE_SIZE = 12
 MAX_SAMPLE_SIZE = 20
 MIN_INLIERS_FLOOR = 12
@@ -214,7 +215,7 @@ def get_threshold(
     threshold_from_spacing = 0.0
     if median_nn_distance is not None and median_nn_distance > 0.0:
         threshold_from_spacing = float(THRESHOLD_SPACING_FACTOR) * float(median_nn_distance)
-    return 0.03#max(threshold_from_noise, threshold_from_spacing, MIN_THRESHOLD)
+    return max(threshold_from_noise, threshold_from_spacing, MIN_THRESHOLD)
 
 
 def resolve_input_path(pc_file: str | Path) -> Path:
@@ -290,6 +291,7 @@ def sample_input_mesh(
         [mesh],
         n_points=n_points,
         noise_std=NOISE_STD,
+        normal_noise_std=0.0,
         seed=seed,
     )
     sampled_points = np.vstack([np.asarray(sampled_points_list[0], dtype=np.float64),np.asarray(noisy_sampled[0], dtype=np.float64),])
@@ -443,7 +445,7 @@ def create_and_estimate_supq(
     palette = ["lightgreen", "orange", "violet", "cyan", "yellow", "red", "lime", "pink", "gold", "turquoise"]
     n_gt = 0  # no ground truth meshes
     total_best_mss_used = None
-    max_models = 4 # <-- how many superquadrics to find
+    max_models = MAX_MODELS
     models = []
     inliers_masks = []
     algorithm_t0 = time.perf_counter()
@@ -472,8 +474,8 @@ def create_and_estimate_supq(
             sampled_points,
             threshold=threshold,
             max_models=max_models,
-            max_iterations=10,
-            inner_iterations=100,
+            max_iterations=40,
+            inner_iterations=150,
             radius=graph_radius,
             graphcut=True,
             random_seed=run_seeds.algorithm,
@@ -496,8 +498,8 @@ def create_and_estimate_supq(
             normals,
             threshold=threshold,
             max_models=max_models,
-            max_iterations=80,
-            inner_iterations=150,
+            max_iterations=10,
+            inner_iterations=100,
             radius=graph_radius,
             use_normal_coherence=use_normal_coherence,
             min_coverage=MIN_COVERAGE,

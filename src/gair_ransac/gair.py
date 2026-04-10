@@ -55,7 +55,6 @@ def gair(
         alignment = normal_alignment_score(model, points, normals)
         normal_penalty = np.clip(0.5 * (1.0 - alignment), 0.0, 1.0)
         cost_inlier += model_normal_weight * normal_penalty
-
     # Allocate maxflow graph
     g = maxflow.Graph[float](N, int(edges.shape[0] * 2))
     nodeids = g.add_nodes(N)

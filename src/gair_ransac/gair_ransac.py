@@ -5,7 +5,7 @@ import numpy as np
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from src.visualizations.visualization import save_point_cloud_inlier_view
 from .consensus import compute_consensus, expanded_removal_mask
-from .inner_ransac import inner_ransac, fit_superquadric_ls
+from .inner_ransac import inner_ransac, fit_superquadric_ls, model_matches_support_scale
 from .gair import gair
 from .initgraph import build_radius_graph
 from .mss import (
@@ -98,9 +98,12 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             sampler_context = build_adaptive_local_fps_sampler_context(current_point_cloud, mss_normals)
         # Main RANSAC loop over m hypotheses-------------EXTERNAL RANSAC----------------
         best_mss_used: FloatArray | None = None
+        first_mss=True
+        first_refinement=True
         for j in range(n_hypotheses):
             # Draw a non-minimal sample set and estimate a candidate model
             M_j = np.asarray(
+                
                 adaptive_local_fps_mss(
                     current_point_cloud,
                     mss_normals,
@@ -112,15 +115,18 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     sampler_context=sampler_context,
                     max_pool_fraction=mss_max_pool_fraction,
                 ),
+                
                 dtype=np.float64,
             )
-            """
-            save_point_cloud_inlier_view(
-                current_point_cloud,
-                _point_subset_mask(current_point_cloud, M_j),
-                IMAGES_DIR / f"gair_ransac_model_{k + 1:02d}_hyp_{j + 1:03d}_mss.png",
-            )
-            """
+            
+            if first_mss:
+                save_point_cloud_inlier_view(
+                    current_point_cloud,
+                    _point_subset_mask(current_point_cloud, M_j),
+                    IMAGES_DIR / f"gair_ransac_model_{k + 1:02d}_hyp_{j + 1:03d}_mss.png",
+                )
+                first_mss=False
+            
             try:
                 H_j: SuperQuadricParams = fit_superquadric_ls(M_j, error_metric=error_metric)
             except Exception:
@@ -165,13 +171,17 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     dtype=bool,
                 )
                 local_iteration += 1
-                """
-                save_point_cloud_inlier_view(
-                    current_point_cloud,
-                    refined_inliers,
-                    IMAGES_DIR / f"gair_ransac_model_{k + 1:02d}_hyp_{j + 1:03d}_gair_{local_iteration:02d}.png",
-                )
-                """
+
+                
+                if first_refinement:
+                    save_point_cloud_inlier_view(
+                        current_point_cloud,
+                        refined_inliers,
+                        IMAGES_DIR / f"gair_ransac_model_{k + 1:02d}_hyp_{j + 1:03d}_gair_{local_iteration:02d}.png",
+                    )
+                    
+
+                
                 refined_count: int = int(np.count_nonzero(refined_inliers))
                 # Stop if the refined set is too small
                 if refined_count < min_inliers:
@@ -204,7 +214,6 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 # from here
                 
                 new_inliers_mask_c_hat: BoolArray = np.asarray(inner_result.best_inliers_mask, dtype=bool)
-
                 if compare_consensus(current_inliers, new_inliers_mask_c_hat, min_gain=min_gain):
                     current_inliers = new_inliers_mask_c_hat
                     current_count = int(np.count_nonzero(new_inliers_mask_c_hat))
@@ -221,11 +230,15 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                 else:
                     terminate = True
                 """
-
+            first_refinement=False
 
 
             # Update the best-so-far solution for the current residual
             if current_count > int(np.count_nonzero(best_inliers)):
+                if current_count >= min_inliers:
+                    current_points = current_point_cloud[current_inliers]
+                    if not model_matches_support_scale(current_model, current_points, threshold):
+                        continue
                 best_model = current_model
                 best_inliers = current_inliers
                 best_mss_used = M_j.copy()
@@ -261,7 +274,11 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
                     dtype=bool,
                 )
                 refit_count = int(np.count_nonzero(refit_inliers))
-                if refit_count >= best_count:
+                if refit_count >= best_count and model_matches_support_scale(
+                    refit_model,
+                    current_point_cloud[refit_inliers],
+                    threshold,
+                ):
                     best_model = refit_model
                     best_inliers = refit_inliers
                     best_count = refit_count
@@ -299,7 +316,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             best_model,
             current_point_cloud,
             threshold,
-            factor=1.01,
+            factor=0.9,
             error_metric=consensus_metric,
             normals=V,
         )

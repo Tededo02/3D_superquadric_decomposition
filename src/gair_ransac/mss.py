@@ -25,6 +25,7 @@ class AdaptiveLocalFpsSamplerContext:
     normals: np.ndarray | None
     tree: cKDTree
     base_scale: float
+    seed_sampling_weights: np.ndarray
 
 
 def _normalize_normals(
@@ -53,10 +54,17 @@ def build_adaptive_local_fps_sampler_context(
     n_points = int(points.shape[0])
     if n_points <= 1:
         base_scale = 1e-9
+        seed_sampling_weights = np.ones(n_points, dtype=np.float64)
     else:
         nn_dists, _ = tree.query(points, k=2)
         nn_dists = np.asarray(nn_dists, dtype=np.float64)
-        base_scale = max(float(np.median(nn_dists[:, 1])), 1e-9)
+        local_spacing = np.maximum(nn_dists[:, 1], 1e-9)
+        base_scale = max(float(np.median(local_spacing)), 1e-9)
+
+        # Prefer seeds in denser areas: smaller local spacing -> larger weight.
+        density_score = base_scale / local_spacing
+        seed_sampling_weights = np.clip(density_score, 1e-3, None)
+        seed_sampling_weights /= seed_sampling_weights.sum()
 
     return AdaptiveLocalFpsSamplerContext(
         data=data,
@@ -64,6 +72,7 @@ def build_adaptive_local_fps_sampler_context(
         normals=normals_arr,
         tree=tree,
         base_scale=base_scale,
+        seed_sampling_weights=seed_sampling_weights,
     )
 
 # this function is used to spread the sample inside the local pool
@@ -178,7 +187,7 @@ def adaptive_local_fps_mss(
     normals: np.ndarray | None = None,
     primitive_type: str = "superquadric",
     sample_size: int = 10,
-    seed_tries: int = 10,
+    seed_tries: int = 15,
     candidate_multiplier: float = 4.0,
     initial_k: int = 96,
     normal_cos_min: float = 0.35,
@@ -192,7 +201,7 @@ def adaptive_local_fps_mss(
     Robust local MSS for detached, touching, and mildly overlapping shapes.
 
     Strategy:
-    1. draw several random seeds
+    1. draw several random seeds, biased toward denser regions
     2. gather a compact local k-NN pool around each seed
     3. filter neighbors using normal coherence and tangent compatibility
     4. spread the final MSS inside that pool with farthest-point sampling
@@ -209,6 +218,7 @@ def adaptive_local_fps_mss(
     normals_arr = context.normals
     tree = context.tree
     base_scale = context.base_scale
+    seed_sampling_weights = context.seed_sampling_weights
     N = int(points.shape[0])
 
     if primitive_type in _CLOSED_FORM_SIZES:
@@ -233,7 +243,7 @@ def adaptive_local_fps_mss(
     n_trials = max(int(seed_tries), 1)
 
     for _ in range(n_trials):
-        seed_idx = int(rng.integers(N))
+        seed_idx = int(rng.choice(N, p=seed_sampling_weights))
         pool_idx = _coherent_local_pool_indices(
             points=points,
             tree=tree,

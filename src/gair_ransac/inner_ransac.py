@@ -6,6 +6,13 @@ from scipy.optimize import least_squares
 from .consensus import compute_consensus
 from src.superquadrics.superquadric_residual import superquadric_radial_residual_and_jacobian,superquadric_residual_vector
 
+AXIS_UPPER_FACTOR = 1.6
+AXIS_UPPER_FLOOR_FACTOR = 0.18
+TRANSLATION_MARGIN_FACTOR = 0.15
+MIN_TRANSLATION_MARGIN_FACTOR = 0.05
+MODEL_DIAGONAL_SUPPORT_FACTOR = 1.6
+MODEL_SUPPORT_SLACK_FACTOR = 4.0
+
 
 @dataclass
 class InnerRansacResult:
@@ -54,6 +61,53 @@ def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
     )
 
 
+def _reference_axis_upper_bounds(
+    reference_points: np.ndarray,
+    reference_diagonal: float,
+    min_axis_length: float,
+    global_max_axis_length: float,
+) -> np.ndarray:
+    reference_model = pca_initialization(reference_points)
+    reference_axes = np.array(
+        [reference_model.a1, reference_model.a2, reference_model.a3],
+        dtype=np.float64,
+    )
+    axis_floor = max(min_axis_length, AXIS_UPPER_FLOOR_FACTOR * reference_diagonal)
+    upper_bounds = np.maximum(AXIS_UPPER_FACTOR * reference_axes, axis_floor)
+    return np.clip(upper_bounds, min_axis_length, global_max_axis_length)
+
+
+def model_matches_support_scale(
+    model: SuperQuadricParams,
+    support_points: np.ndarray,
+    threshold: float = 0.0,
+) -> bool:
+    support_array = np.asarray(support_points, dtype=np.float64)
+    if support_array.shape[0] == 0:
+        return False
+
+    axes = np.array([model.a1, model.a2, model.a3], dtype=np.float64)
+    support_spans = np.ptp(support_array, axis=0)
+    support_diagonal = float(np.linalg.norm(support_spans))
+    slack = max(
+        MODEL_SUPPORT_SLACK_FACTOR * float(threshold),
+        0.02 * support_diagonal,
+        1e-3,
+    )
+
+    model_diagonal = float(np.linalg.norm(2.0 * axes))
+    return bool(model_diagonal <= MODEL_DIAGONAL_SUPPORT_FACTOR * support_diagonal + slack)
+
+
+def _normalize_index_input(index_input: np.ndarray, n_points: int, name: str) -> np.ndarray:
+    index_array = np.asarray(index_input)
+    if index_array.dtype == bool:
+        if index_array.shape != (n_points,):
+            raise ValueError(f"{name} boolean mask must have shape ({n_points},), got {index_array.shape}")
+        return np.flatnonzero(index_array).astype(np.int64)
+    return np.asarray(index_input, dtype=np.int64)
+
+
 # Fit a superquadric with bounded non-linear least squares.
 def fit_superquadric_ls(
     points: np.ndarray,
@@ -74,12 +128,23 @@ def fit_superquadric_ls(
 
     reference_min = reference_points.min(axis=0)
     reference_max = reference_points.max(axis=0)
+    reference_span = reference_max - reference_min
     reference_diagonal = float(np.linalg.norm(reference_max - reference_min) + 1e-12)
     min_axis_length = max(1e-3, 5e-2 * reference_diagonal)
-    max_axis_length = max(1e-2, 1.2 * reference_diagonal)
+    global_max_axis_length = max(1e-2, 1.2 * reference_diagonal)
+    max_axis_lengths = _reference_axis_upper_bounds(
+        reference_points,
+        reference_diagonal,
+        min_axis_length,
+        global_max_axis_length,
+    )
     exponent_min, exponent_max = 0.08, 4.0
     angle_min, angle_max = -np.pi, np.pi
-    translation_margin = 0.25 * reference_diagonal
+    min_translation_margin = MIN_TRANSLATION_MARGIN_FACTOR * reference_diagonal
+    translation_margin = np.maximum(
+        TRANSLATION_MARGIN_FACTOR * reference_span,
+        min_translation_margin,
+    )
 
     lower_bounds = np.array(
         [
@@ -91,25 +156,25 @@ def fit_superquadric_ls(
             angle_min,
             angle_min,
             angle_min,
-            reference_min[0] - translation_margin,
-            reference_min[1] - translation_margin,
-            reference_min[2] - translation_margin,
+            reference_min[0] - translation_margin[0],
+            reference_min[1] - translation_margin[1],
+            reference_min[2] - translation_margin[2],
         ],
         dtype=np.float64,
     )
     upper_bounds = np.array(
         [
-            max_axis_length,
-            max_axis_length,
-            max_axis_length,
+            max_axis_lengths[0],
+            max_axis_lengths[1],
+            max_axis_lengths[2],
             exponent_max,
             exponent_max,
             angle_max,
             angle_max,
             angle_max,
-            reference_max[0] + translation_margin,
-            reference_max[1] + translation_margin,
-            reference_max[2] + translation_margin,
+            reference_max[0] + translation_margin[0],
+            reference_max[1] + translation_margin[1],
+            reference_max[2] + translation_margin[2],
         ],
         dtype=np.float64,
     )
@@ -221,10 +286,18 @@ def inner_ransac(
     sample_size: int = 30,
 ) -> InnerRansacResult:
     point_array = np.asarray(point_cloud, dtype=np.float64)
-    candidate_indices = np.asarray(refined_set_index, dtype=np.int64)
-    evaluation_indices = None if actual_set_index is None else np.asarray(actual_set_index, dtype=np.int64)
+    candidate_indices = _normalize_index_input(refined_set_index, point_array.shape[0], "refined_set_index")
+    evaluation_indices = (
+        None
+        if actual_set_index is None
+        else _normalize_index_input(actual_set_index, point_array.shape[0], "actual_set_index")
+    )
     evaluation_points = point_array if evaluation_indices is None else point_array[evaluation_indices]
-    evaluation_normals = None if normals is None else np.asarray(normals, dtype=np.float64)
+    if normals is None:
+        evaluation_normals = None
+    else:
+        normal_array = np.asarray(normals, dtype=np.float64)
+        evaluation_normals = normal_array if evaluation_indices is None else normal_array[evaluation_indices]
     if sample_size <= 0:
         raise ValueError(f"sample_size must be positive, got {sample_size}")
 

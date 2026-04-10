@@ -17,9 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 CSV_PATH = ROOT / "experiments" / "artifacts" / "figure6_7_multi_model" / "results.csv"
 OUTPUT_PATH = ROOT / "csv_scripts" / "out" / "figure6_7_multi_model.png"
-DEFAULT_ERROR_METHODS = ["Ransac", "Ransac + LO", "Ransac + GAIR"]
-DEFAULT_TIME_METHODS = ["Ransac + LO", "Ransac + GAIR"]
-DEFAULT_REFINEMENT_METHODS = ["Ransac + LO", "Ransac + GAIR"]
+DEFAULT_ERROR_METHODS = ["Ransac", "Ransac + LO", "Ransac + GC", "Ransac + GAIR"]
+DEFAULT_TIME_METHODS = ["Ransac + LO", "Ransac + GC", "Ransac + GAIR"]
+DEFAULT_REFINEMENT_METHODS = ["Ransac + LO", "Ransac + GC", "Ransac + GAIR"]
 
 
 def parse_args():

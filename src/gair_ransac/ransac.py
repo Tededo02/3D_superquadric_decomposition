@@ -3,7 +3,7 @@ import numpy as np
 
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from .consensus import compute_consensus, expanded_removal_mask
-from .inner_ransac import inner_ransac, fit_superquadric_ls, InnerRansacResult
+from .inner_ransac import inner_ransac, fit_superquadric_ls, InnerRansacResult, model_matches_support_scale
 from .mss import adaptive_local_fps_mss
 from .gair import gair
 from .initgraph import build_radius_graph
@@ -173,7 +173,6 @@ def ransac(
                         continue
 
                     new_inliers_mask: BoolArray = np.asarray(inner_result.best_inliers_mask, dtype=bool)
-
                     if compare_consensus(current_inliers, new_inliers_mask, min_gain=min_gain):
                         current_inliers = new_inliers_mask
                         current_count = int(np.count_nonzero(new_inliers_mask))
@@ -204,6 +203,10 @@ def ransac(
                         current_model = inner_result.best_model
 
             if current_count > int(np.count_nonzero(best_inliers)):
+                if current_count >= min_inliers:
+                    current_points = current_point_cloud[current_inliers]
+                    if not model_matches_support_scale(current_model, current_points, threshold):
+                        continue
                 best_model = current_model
                 best_inliers = current_inliers
 
@@ -228,7 +231,11 @@ def ransac(
                     dtype=bool,
                 )
                 refit_count = int(np.count_nonzero(refit_inliers))
-                if refit_count >= best_count:
+                if refit_count >= best_count and model_matches_support_scale(
+                    refit_model,
+                    current_point_cloud[refit_inliers],
+                    threshold,
+                ):
                     best_model = refit_model
                     best_inliers = refit_inliers
                     best_count = refit_count
