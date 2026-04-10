@@ -99,13 +99,10 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, thre
                 M_j: FloatArray = current_point_cloud.copy()
             else:
                 M_j = np.asarray(
-                    adaptive_local_fps_mss(
+                    spatial_walk_mss(
                         current_point_cloud,
                         V_mss,
                         sample_size=sample_size,
-                        seed_tries=12,
-                        candidate_multiplier=20.0,
-                        initial_k=512,
                         rng=rng,
                     ),
                     dtype=np.float64,

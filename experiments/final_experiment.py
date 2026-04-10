@@ -22,7 +22,7 @@ from src.visualizations import visualization as vis
 # ── config ────────────────────────────────────────────────────────────────────
 VISUALIZE  = False   # set to False to skip visualization and run all trials headlessly
 PC_DIR     = ROOT / "src" / "point_clouds"
-THRESHOLD  = 0.3
+THRESHOLD  = 0.2
 GRAPH_RADIUS = 0.06
 MAX_MODELS = 3
 MAX_ITER   = 10
@@ -31,7 +31,7 @@ N_TRIALS   = 10
 K = 3
 EVAL_SEED  = 42          # fixed so chamfer is comparable across trials
 OUT_DIR    = ROOT / "experiments" / "artifacts" / "final_experiment"
-N_OUTLIERS = 0           # number of random uniform outliers to inject (0 = none)
+N_OUTLIERS = 130           # number of random uniform outliers to inject (0 = none)
 NOISE      = 0        # gaussian noise std applied to positions and normals (0.0 = none)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -149,15 +149,18 @@ def run_for_pc(pc_file: Path, rng):
     all_results = []
     all_candidates = {algo: [] for algo in algorithms}
 
-    for algo in algorithms:
-        print(f"\n=== {algo} ===")
-        for trial in range(N_TRIALS):
-            seed = int(rng.integers(0, 2**31))
+    for trial in range(N_TRIALS):
+        seed = int(rng.integers(0, 2**31))
+        print(f"\n{'─'*60}")
+        print(f"Trial {trial}  (seed={seed})")
+        print(f"{'─'*60}")
+        for algo in algorithms:
+            print(f"\n=== {algo} ===")
             result = run_one(points, normals, clean_points, n_clean, algo, seed)
             if result is None:
-                print(f"  trial {trial}: no model found, skipping")
+                print(f"  no model found, skipping")
                 continue
-            print(f"  trial {trial} | CD={result['chamfer']:.4f}  CD_COV={result['cd_coverage']:.4f}  CD_ACC={result['cd_accuracy']:.4f}  HD={result['hausdorff']:.4f}  CLF={result['classification_rate']:.3f}  RT={result['runtime_s']:.1f}s  models={result['n_models']}")
+            print(f"  CD={result['chamfer']:.4f}  CD_COV={result['cd_coverage']:.4f}  CD_ACC={result['cd_accuracy']:.4f}  HD={result['hausdorff']:.4f}  CLF={result['classification_rate']:.3f}  RT={result['runtime_s']:.1f}s  models={result['n_models']}")
             all_results.append({"algo": algo, "trial": trial, "seed": seed, **{k: v for k, v in result.items() if k != "models"}})
             all_candidates[algo].extend(result["models"])
 
