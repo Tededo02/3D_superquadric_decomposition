@@ -69,7 +69,7 @@ def create_and_estimate_supq():
                             colors.append("lightgreen")
                     elif algo == "gc-ransac":
                         graph_radius = 0.08
-                        models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=threshold, max_models=len(list_mesh), max_iterations=10, inner_iterations=40, radius=graph_radius, use_normal_coherence=False, consensus_metric="radial")
+                        models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=threshold, max_models=len(list_mesh), max_iterations=10, inner_iterations=40, radius=graph_radius, use_normal_coherence=False)
                         if not models:
                             raise RuntimeError("gc-ransac did not return any model")
                         for model in models:
@@ -77,14 +77,14 @@ def create_and_estimate_supq():
                             colors.append("lightgreen")
                     elif algo == "gair-ransac":
                         graph_radius = 0.08
-                        models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=threshold, max_models=len(list_mesh), max_iterations=10, inner_iterations=40, radius=graph_radius, use_normal_coherence=True, consensus_metric="radial")
+                        models, inliers_masks, total_best_mss_used = gair_ransac(sampled_points, normals, threshold=threshold, max_models=len(list_mesh), max_iterations=10, inner_iterations=40, radius=graph_radius, use_normal_coherence=True)
                         if not models:
                             raise RuntimeError("gair_ransac did not return any model")
                         for model in models:
                             list_mesh.append(supmesh.superquadric_mesh(model))
                             colors.append("lightgreen")
                     elif algo == "vanilla-ransac":
-                        models, inliers_masks = vanilla_ransac(sampled_points, normals, threshold=threshold, max_models=len(list_mesh), max_iterations=10, consensus_metric="radial")
+                        models, inliers_masks = vanilla_ransac(sampled_points, normals, threshold=threshold, max_models=len(list_mesh), max_iterations=10)
                         if not models:
                             raise RuntimeError("vanilla-ransac did not return any model")
                         for model in models:

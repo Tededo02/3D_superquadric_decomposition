@@ -110,7 +110,6 @@ def main():
         threshold=THRESHOLD,
         max_models=MAX_MODELS,
         max_iterations=MAX_ITER,
-        consensus_metric="radial",
         random_seed=SEED,
     )
     if not models_before:

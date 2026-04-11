@@ -50,10 +50,10 @@ def main() -> int:
     for metric in Y_METRICS:
         output_dir = Path("artifacts") / f"outliers_vs_{metric}"
         curves = [
-            (f"RANSAC m={m}", "ransac", "first_order", True, metric, m)
+            (f"RANSAC m={m}", "ransac", True, metric, m)
             for m in HYPOTHESIS_VALUES
         ] + [
-            (f"GAIR-RANSAC m={5}(inner={GAIR_INNER_ITERATIONS})", "gair-ransac", "first_order", True, metric, 5)
+            (f"GAIR-RANSAC m={5}(inner={GAIR_INNER_ITERATIONS})", "gair-ransac", True, metric, 5)
         ]
         result = run_outlier_hypotheses_benchmark(
             title=f"Outliers vs {_metric_title(metric)} - noise_std = {FIXED_NOISE_STD}, threshold = {THRESHOLD}",

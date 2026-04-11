@@ -138,7 +138,6 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
                 points[current_indices],
                 treshold,
                 factor=1.3,
-                error_metric="radial",
             )
             remaining_mask[current_indices[remove_mask]] = False
 

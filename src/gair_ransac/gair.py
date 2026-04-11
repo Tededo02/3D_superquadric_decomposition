@@ -16,7 +16,6 @@ def gair(
     normals: np.ndarray,
     model: SuperQuadricParams,
     eps: float,
-    error_metric: str = "radial",
     use_normal_coherence: bool = True,
     use_model_normal_agreement: bool = False,
     model_normal_weight: float = 1.0,
@@ -27,7 +26,6 @@ def gair(
     # normals: (N, 3) unit normals
     # model: current superquadric
     # eps: inlier threshold epsilon
-    # error_metric: residual used for unary costs
     points = np.asarray(points, dtype=np.float64)
     normals = np.asarray(normals, dtype=np.float64)
     edges = np.asarray(edges, dtype=np.int64)
@@ -40,7 +38,7 @@ def gair(
     # distances/residuals
     eps_denom = float(eps) + 1e-12
     pair_denom = float(OUTLIER_SCALE) * float(eps) + 1e-12
-    dist = distance_err(model, points, error_metric=error_metric)  # (N,)
+    dist = distance_err(model, points)  # (N,)
     d_unary = np.clip(dist / eps_denom, 0.0, 1.0)
     d_pair = np.clip(dist / pair_denom, 0.0, 1.0)
 

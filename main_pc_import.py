@@ -505,8 +505,6 @@ def create_and_estimate_supq(
             min_coverage=MIN_COVERAGE,
             random_seed=run_seeds.algorithm,
             use_normal_guided_mss=use_normal_guided_mss,
-            consensus_metric="radial",
-            error_metric="radial",
             sample_size=ransac_tuning.sample_size,
             min_inliers=ransac_tuning.min_inliers,
             mss_max_pool_fraction=ransac_tuning.mss_max_pool_fraction,

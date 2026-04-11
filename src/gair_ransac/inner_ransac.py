@@ -4,7 +4,7 @@ import numpy as np
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from scipy.optimize import least_squares
 from .consensus import compute_consensus
-from src.superquadrics.superquadric_residual import superquadric_radial_residual_and_jacobian,superquadric_residual_vector
+from src.superquadrics.superquadric_residual import superquadric_radial_residual_and_jacobian
 
 AXIS_UPPER_FACTOR = 1.6
 AXIS_UPPER_FLOOR_FACTOR = 0.18
@@ -111,7 +111,6 @@ def _normalize_index_input(index_input: np.ndarray, n_points: int, name: str) ->
 # Fit a superquadric with bounded non-linear least squares.
 def fit_superquadric_ls(
     points: np.ndarray,
-    error_metric: str = "radial",
     bounds_reference_points: np.ndarray | None = None,
 ) -> SuperQuadricParams:
     point_array = np.asarray(points, dtype=np.float64)
@@ -197,46 +196,11 @@ def fit_superquadric_ls(
     )
     np.clip(initial_parameters, lower_bounds, upper_bounds, out=initial_parameters)
 
-    normalized_metric = error_metric.lower().replace("-", "_").replace(" ", "_")
+    radial_cache: dict[str, np.ndarray | None] = {"parameters": None, "residuals": None, "jacobian": None}
 
-    # SciPy uses the keyword fun for the residual function to minimize.
-    if normalized_metric == "radial":
-        radial_cache: dict[str, np.ndarray | None] = {"parameters": None, "residuals": None, "jacobian": None}
-
-        def radial_residuals(parameters: np.ndarray) -> np.ndarray:
-            cached_parameters = radial_cache["parameters"]
-            if cached_parameters is None or not np.array_equal(cached_parameters, parameters):
-                current_model = SuperQuadricParams(
-                    a1=parameters[0],
-                    a2=parameters[1],
-                    a3=parameters[2],
-                    e1=parameters[3],
-                    e2=parameters[4],
-                    rot=np.array(parameters[5:8], dtype=np.float64),
-                    t=np.array(parameters[8:11], dtype=np.float64),
-                )
-                residuals, jacobian = superquadric_radial_residual_and_jacobian(current_model, point_array)
-                radial_cache["parameters"] = np.array(parameters, dtype=np.float64, copy=True)
-                radial_cache["residuals"] = residuals
-                radial_cache["jacobian"] = jacobian
-            return radial_cache["residuals"]
-
-        def radial_jacobian(parameters: np.ndarray) -> np.ndarray:
-            radial_residuals(parameters)
-            return radial_cache["jacobian"]
-
-        optimization_result = least_squares(
-            fun=radial_residuals,
-            jac=radial_jacobian,
-            x0=initial_parameters,
-            method="trf",
-            bounds=(lower_bounds, upper_bounds),
-            loss="soft_l1",
-            f_scale=1.0,
-            max_nfev=250,
-        )
-    else:
-        def residuals(parameters: np.ndarray) -> np.ndarray:
+    def radial_residuals(parameters: np.ndarray) -> np.ndarray:
+        cached_parameters = radial_cache["parameters"]
+        if cached_parameters is None or not np.array_equal(cached_parameters, parameters):
             current_model = SuperQuadricParams(
                 a1=parameters[0],
                 a2=parameters[1],
@@ -246,17 +210,26 @@ def fit_superquadric_ls(
                 rot=np.array(parameters[5:8], dtype=np.float64),
                 t=np.array(parameters[8:11], dtype=np.float64),
             )
-            return superquadric_residual_vector(current_model, point_array, metric=error_metric)
+            residuals, jacobian = superquadric_radial_residual_and_jacobian(current_model, point_array)
+            radial_cache["parameters"] = np.array(parameters, dtype=np.float64, copy=True)
+            radial_cache["residuals"] = residuals
+            radial_cache["jacobian"] = jacobian
+        return radial_cache["residuals"]
 
-        optimization_result = least_squares(
-            fun=residuals,
-            x0=initial_parameters,
-            method="trf",
-            bounds=(lower_bounds, upper_bounds),
-            loss="soft_l1",
-            f_scale=1.0,
-            max_nfev=250,
-        )
+    def radial_jacobian(parameters: np.ndarray) -> np.ndarray:
+        radial_residuals(parameters)
+        return radial_cache["jacobian"]
+
+    optimization_result = least_squares(
+        fun=radial_residuals,
+        jac=radial_jacobian,
+        x0=initial_parameters,
+        method="trf",
+        bounds=(lower_bounds, upper_bounds),
+        loss="soft_l1",
+        f_scale=1.0,
+        max_nfev=250,
+    )
 
     if not optimization_result.success:
         raise RuntimeError(f"least_squares failed: {optimization_result.message}")
@@ -279,8 +252,6 @@ def inner_ransac(
     actual_set_index: np.ndarray | None,
     threshold: float,
     normals: np.ndarray | None = None,
-    error_metric: str = "radial",
-    consensus_metric: str | None = None,
     n_iters: int = 50,
     random_seed: int | None = None,
     sample_size: int = 30,
@@ -304,7 +275,6 @@ def inner_ransac(
     # Use the current GAIR set as the reference support for bounded fitting.
     fit_reference_points = point_array[candidate_indices]
     sampled_point_count = min(candidate_indices.size, int(sample_size))
-    effective_consensus_metric = error_metric if consensus_metric is None else consensus_metric
 
     best_model: Optional[SuperQuadricParams] = None
     best_inlier_mask = np.empty((0,), dtype=bool)
@@ -318,7 +288,6 @@ def inner_ransac(
         try:
             candidate_model = fit_superquadric_ls(
                 sampled_points,
-                error_metric=error_metric,
                 bounds_reference_points=fit_reference_points,
             )
         except Exception:
@@ -328,7 +297,6 @@ def inner_ransac(
             candidate_model,
             evaluation_points,
             threshold,
-            error_metric=effective_consensus_metric,
             normals=evaluation_normals,
         )
         candidate_inlier_count = int(np.count_nonzero(candidate_inlier_mask))
@@ -351,14 +319,12 @@ def inner_ransac(
         try:
             refined_model = fit_superquadric_ls(
                 best_inlier_points,
-                error_metric=error_metric,
                 bounds_reference_points=best_inlier_points,
             )
             refined_inlier_mask = compute_consensus(
                 refined_model,
                 evaluation_points,
                 threshold,
-                error_metric=effective_consensus_metric,
                 normals=evaluation_normals,
             )
             refined_inlier_count = int(np.count_nonzero(refined_inlier_mask))

@@ -1,13 +1,15 @@
 from typing import Optional
+
 import numpy as np
+from numpy.typing import NDArray
 
 from src.superquadrics.superquadric_param import SuperQuadricParams
+
 from .consensus import compute_consensus, expanded_removal_mask
-from .inner_ransac import inner_ransac, fit_superquadric_ls, InnerRansacResult, model_matches_support_scale
-from .mss import adaptive_local_fps_mss
 from .gair import gair
 from .initgraph import build_radius_graph
-from numpy.typing import NDArray
+from .inner_ransac import InnerRansacResult, fit_superquadric_ls, inner_ransac, model_matches_support_scale
+from .mss import adaptive_local_fps_mss
 
 FloatArray = NDArray[np.float64]
 BoolArray = NDArray[np.bool_]
@@ -29,8 +31,6 @@ def ransac(
     sample_size: int = 30,
     min_inliers: int = 30,
     min_gain: int = 1,
-    error_metric: str = "mix",
-    consensus_metric: str = "radial",
     inner_iterations: int = 50,
     random_seed: int | None = None,
     graphcut: bool = True,
@@ -46,7 +46,7 @@ def ransac(
             raise ValueError(
                 f"normals must have shape {point_cloud.shape}, got {provided_normals.shape}"
             )
-    # dummy normals: normal coherence is disabled, but gair still requires shape (N,3)
+
     dummy_normals: FloatArray = np.zeros((point_cloud.shape[0], 3), dtype=np.float64)
     rng = np.random.default_rng(random_seed)
     n_points: int = point_cloud.shape[0]
@@ -63,21 +63,23 @@ def ransac(
         best_model: Optional[SuperQuadricParams] = None
         best_inliers: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
 
-        # Build radius graph once for the current residual (only needed for graphcut)
         if graphcut:
-            _, edge = build_radius_graph(current_point_cloud, m_neighbors=m_neighbors, radius=radius, radius_is_relative=radius_is_relative)
-            edge: IntArray = np.asarray(edge, dtype=np.int64)
+            _, edge = build_radius_graph(
+                current_point_cloud,
+                m_neighbors=m_neighbors,
+                radius=radius,
+                radius_is_relative=radius_is_relative,
+            )
+            edge = np.asarray(edge, dtype=np.int64)
 
         for _ in range(max_iterations):
             sampler_normals: FloatArray | None = None
             if use_normal_guided_mss is not None:
                 if use_normal_guided_mss and provided_normals is not None:
                     sampler_normals = provided_normals[remaining_indices]
-                else:
-                    sampler_normals = None
 
-            if graphcut:
-                sample_pts: FloatArray = np.asarray(
+            if graphcut or use_normal_guided_mss is not None:
+                sample_points: FloatArray = np.asarray(
                     adaptive_local_fps_mss(
                         current_point_cloud,
                         normals=sampler_normals,
@@ -91,50 +93,34 @@ def ransac(
                     dtype=np.float64,
                 )
             else:
-                if use_normal_guided_mss is None:
-                    idx = rng.choice(
-                        current_point_cloud.shape[0],
-                        size=min(sample_size, current_point_cloud.shape[0]),
-                        replace=False,
-                    )
-                    sample_pts = current_point_cloud[idx]
-                else:
-                    sample_pts = np.asarray(
-                        adaptive_local_fps_mss(
-                            current_point_cloud,
-                            normals=sampler_normals,
-                            sample_size=sample_size,
-                            seed_tries=12,
-                            candidate_multiplier=20.0,
-                            initial_k=512,
-                            rng=rng,
-                            max_pool_fraction=mss_max_pool_fraction,
-                        ),
-                        dtype=np.float64,
-                    )
+                idx = rng.choice(
+                    current_point_cloud.shape[0],
+                    size=min(sample_size, current_point_cloud.shape[0]),
+                    replace=False,
+                )
+                sample_points = current_point_cloud[idx]
 
             try:
-                H_j: SuperQuadricParams = fit_superquadric_ls(sample_pts, error_metric="first_order")
+                candidate_model = fit_superquadric_ls(sample_points)
             except Exception:
                 continue
 
             candidate_inliers: BoolArray = np.asarray(
-                compute_consensus(H_j, current_point_cloud, threshold, error_metric=consensus_metric),
+                compute_consensus(candidate_model, current_point_cloud, threshold),
                 dtype=bool,
             )
-            candidate_count: int = int(np.count_nonzero(candidate_inliers))
-            best_count: int = int(np.count_nonzero(best_inliers))
+            candidate_count = int(np.count_nonzero(candidate_inliers))
+            best_count = int(np.count_nonzero(best_inliers))
 
             if candidate_count < best_count + 1:
                 continue
 
-            current_model: SuperQuadricParams = H_j
-            current_inliers: BoolArray = candidate_inliers.copy()
-            current_count: int = candidate_count
+            current_model = candidate_model
+            current_inliers = candidate_inliers.copy()
+            current_count = candidate_count
 
             if graphcut:
-                # Local optimization: GC (no normal coherence) + inner RANSAC
-                terminate: bool = False
+                terminate = False
                 while not terminate:
                     refined_inliers: BoolArray = np.asarray(
                         gair(
@@ -143,31 +129,25 @@ def ransac(
                             normals=current_normals,
                             model=current_model,
                             eps=threshold,
-                            error_metric=consensus_metric,
                             use_normal_coherence=False,
                         ),
                         dtype=bool,
                     )
-                    refined_count: int = int(np.count_nonzero(refined_inliers))
-
+                    refined_count = int(np.count_nonzero(refined_inliers))
                     if refined_count < min_inliers:
                         terminate = True
                         continue
 
-                    refined_set_index: IntArray = np.flatnonzero(refined_inliers).astype(np.int64)
-
+                    refined_set_index = np.flatnonzero(refined_inliers).astype(np.int64)
                     inner_result: InnerRansacResult = inner_ransac(
                         current_point_cloud,
                         refined_set_index,
                         None,
                         threshold,
                         normals=None,
-                        error_metric=error_metric,
-                        consensus_metric=consensus_metric,
                         n_iters=inner_iterations,
                         random_seed=int(rng.integers(0, np.iinfo(np.int32).max)),
                     )
-
                     if inner_result.best_inlier_count <= 0:
                         terminate = True
                         continue
@@ -180,26 +160,20 @@ def ransac(
                     else:
                         terminate = True
             else:
-                # Simple inner RANSAC on candidate inliers, no graph
-                refined_set_index: IntArray = np.flatnonzero(candidate_inliers).astype(np.int64)
-
+                refined_set_index = np.flatnonzero(candidate_inliers).astype(np.int64)
                 if refined_set_index.size >= min_inliers:
-                    inner_result: InnerRansacResult = inner_ransac(
+                    inner_result = inner_ransac(
                         current_point_cloud,
                         refined_set_index,
                         None,
                         threshold,
                         normals=None,
-                        error_metric=error_metric,
-                        consensus_metric=consensus_metric,
                         n_iters=inner_iterations,
                         random_seed=int(rng.integers(0, np.iinfo(np.int32).max)),
                     )
-
                     if inner_result.best_inlier_count > 0:
-                        new_inliers_mask: BoolArray = np.asarray(inner_result.best_inliers_mask, dtype=bool)
-                        current_inliers = new_inliers_mask
-                        current_count = int(np.count_nonzero(new_inliers_mask))
+                        current_inliers = np.asarray(inner_result.best_inliers_mask, dtype=bool)
+                        current_count = int(np.count_nonzero(current_inliers))
                         current_model = inner_result.best_model
 
             if current_count > int(np.count_nonzero(best_inliers)):
@@ -213,21 +187,19 @@ def ransac(
         if best_model is None:
             break
 
-        best_count: int = int(np.count_nonzero(best_inliers))
+        best_count = int(np.count_nonzero(best_inliers))
         if best_count < min_inliers:
             break
 
-        # Final refit on all inliers
         best_points = current_point_cloud[best_inliers]
         if best_points.shape[0] >= 11:
             try:
                 refit_model = fit_superquadric_ls(
                     best_points,
-                    error_metric=error_metric,
                     bounds_reference_points=best_points,
                 )
                 refit_inliers = np.asarray(
-                    compute_consensus(refit_model, current_point_cloud, threshold, error_metric=consensus_metric),
+                    compute_consensus(refit_model, current_point_cloud, threshold),
                     dtype=bool,
                 )
                 refit_count = int(np.count_nonzero(refit_inliers))
@@ -248,7 +220,12 @@ def ransac(
         models_set.append(best_model)
         inliers_set.append(global_inliers)
 
-        remove_mask = expanded_removal_mask(best_model, current_point_cloud, threshold, factor=1.3, error_metric=consensus_metric)
+        remove_mask = expanded_removal_mask(
+            best_model,
+            current_point_cloud,
+            threshold,
+            factor=1.3,
+        )
         remaining_indices = remaining_indices[~remove_mask]
 
     return models_set, inliers_set

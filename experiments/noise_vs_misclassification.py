@@ -30,17 +30,14 @@ BASE_SEED = 42
 OUTPUT_DIR = Path("artifacts") / "noise_vs_misclassification"
 CURVES = [
     # misclassification
-    ("RANSAC", "ransac", "first_order", True, "misclassification"),
-    ("GAIR-RANSAC first-order", "gair-ransac", "first_order", True, "misclassification"),
-    ("GAIR-RANSAC radial", "gair-ransac", "radial", True, "misclassification"),
+    ("RANSAC", "ransac", True, "misclassification"),
+    ("GAIR-RANSAC", "gair-ransac", True, "misclassification"),
     # chamfer distance
-    ("RANSAC chamfer", "ransac", "first_order", True, "chamfer"),
-    ("GAIR-RANSAC first-order chamfer", "gair-ransac", "first_order", True, "chamfer"),
-    ("GAIR-RANSAC radial chamfer", "gair-ransac", "radial", True, "chamfer"),
+    ("RANSAC chamfer", "ransac", True, "chamfer"),
+    ("GAIR-RANSAC chamfer", "gair-ransac", True, "chamfer"),
     # hausdorff distance
-    ("RANSAC hausdorff", "ransac", "first_order", True, "hausdorff"),
-    ("GAIR-RANSAC first-order hausdorff", "gair-ransac", "first_order", True, "hausdorff"),
-    ("GAIR-RANSAC radial hausdorff", "gair-ransac", "radial", True, "hausdorff"),
+    ("RANSAC hausdorff", "ransac", True, "hausdorff"),
+    ("GAIR-RANSAC hausdorff", "gair-ransac", True, "hausdorff"),
 ]
 
 

@@ -83,28 +83,28 @@ def build_test_cloud(noise_std: float, n_surface_points: int, n_outliers: int, s
 
 
 def normalize_curves(
-    curves: list[tuple[str, str, str, bool] | tuple[str, str, str, bool, str]]
-) -> list[tuple[str, str, str, bool, str]]:
-    normalized: list[tuple[str, str, str, bool, str]] = []
+    curves: list[tuple[str, str, bool] | tuple[str, str, bool, str]]
+) -> list[tuple[str, str, bool, str]]:
+    normalized: list[tuple[str, str, bool, str]] = []
     for curve in curves:
-        if len(curve) == 4:
-            label, algorithm, error_metric, use_normal_coherence = curve
-            normalized.append((label, algorithm, error_metric, use_normal_coherence, "misclassification"))
-        elif len(curve) == 5:
-            label, algorithm, error_metric, use_normal_coherence, classifier = curve
-            normalized.append((label, algorithm, error_metric, use_normal_coherence, classifier))
+        if len(curve) == 3:
+            label, algorithm, use_normal_coherence = curve
+            normalized.append((label, algorithm, use_normal_coherence, "misclassification"))
+        elif len(curve) == 4:
+            label, algorithm, use_normal_coherence, classifier = curve
+            normalized.append((label, algorithm, use_normal_coherence, classifier))
         else:
             raise ValueError(
-                "Each curve must have 4 items "
-                "(label, algorithm, error_metric, use_normal_coherence) "
-                "or 5 items including classifier."
+                "Each curve must have 3 items "
+                "(label, algorithm, use_normal_coherence) "
+                "or 4 items including classifier."
             )
     return normalized
 
 
 # Run one benchmark trial for the noise sweep experiments.
 def run_trial(job: tuple) -> dict[str, float | int | str | bool]:
-    label, algorithm, error_metric, use_normal_coherence, classifier, noise_std, run_idx, base_seed, n_surface_points, n_outliers, threshold_value, threshold_scale, graph_radius, max_iterations, inner_iterations = job
+    label, algorithm, use_normal_coherence, classifier, noise_std, run_idx, base_seed, n_surface_points, n_outliers, threshold_value, threshold_scale, graph_radius, max_iterations, inner_iterations = job
     seed = base_seed + run_idx + int(round(noise_std * 10_000))
     points, normals, gt_inliers = build_test_cloud(noise_std, n_surface_points, n_outliers, seed)
     if threshold_value is None:
@@ -122,7 +122,6 @@ def run_trial(job: tuple) -> dict[str, float | int | str | bool]:
             refined_set_index=np.arange(points.shape[0], dtype=np.int64),
             actual_set_index=np.arange(points.shape[0], dtype=np.int64),
             threshold=threshold,
-            error_metric=error_metric,
             n_iters=inner_iterations,
             random_seed=seed,
         )
@@ -137,7 +136,6 @@ def run_trial(job: tuple) -> dict[str, float | int | str | bool]:
             max_models=1,
             max_iterations=max_iterations,
             radius=graph_radius,
-            error_metric=error_metric,
             inner_iterations=inner_iterations,
             random_seed=seed,
             use_normal_coherence=use_normal_coherence,
@@ -149,7 +147,6 @@ def run_trial(job: tuple) -> dict[str, float | int | str | bool]:
     return {
         "curve": label,
         "algorithm": algorithm,
-        "error_metric": error_metric,
         "use_normal_coherence": use_normal_coherence,
         "classifier": classifier,
         "noise_std": noise_std,
@@ -182,7 +179,7 @@ def _write_summary_csv(summary_rows: list[dict[str, float | int | str | bool]], 
 def run_benchmark(
     title: str,
     output_dir: Path,
-    curves: list[tuple[str, str, str, bool] | tuple[str, str, str, bool, str]],
+    curves: list[tuple[str, str, bool] | tuple[str, str, bool, str]],
     noise_values: list[float] | None,
     noise_start: float,
     noise_stop: float,
@@ -211,7 +208,6 @@ def run_benchmark(
         (
             label,
             algorithm,
-            error_metric,
             use_normal_coherence,
             classifier,
             noise_std,
@@ -225,7 +221,7 @@ def run_benchmark(
             max_iterations,
             inner_iterations,
         )
-        for label, algorithm, error_metric, use_normal_coherence, classifier in curves
+        for label, algorithm, use_normal_coherence, classifier in curves
         for noise_std in noise_grid
         for run_idx in range(runs)
     ]
@@ -243,7 +239,7 @@ def run_benchmark(
 
     summary: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
     summary_rows: list[dict[str, float | int | str | bool]] = []
-    for label, algorithm, error_metric, use_normal_coherence, classifier in curves:
+    for label, algorithm, use_normal_coherence, classifier in curves:
         means: list[float] = []
         stds: list[float] = []
         for noise_std in noise_grid:
@@ -258,7 +254,6 @@ def run_benchmark(
             summary_rows.append({
                 "curve": label,
                 "algorithm": algorithm,
-                "error_metric": error_metric,
                 "use_normal_coherence": use_normal_coherence,
                 "classifier": classifier,
                 "noise_std": noise_std,
@@ -275,7 +270,7 @@ def run_benchmark(
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["curve", "algorithm", "error_metric", "use_normal_coherence", "classifier", "noise_std", "threshold_scale", "threshold", "run_idx", "metric_value"],
+            fieldnames=["curve", "algorithm", "use_normal_coherence", "classifier", "noise_std", "threshold_scale", "threshold", "run_idx", "metric_value"],
         )
         writer.writeheader()
         writer.writerows(raw_rows)
@@ -315,7 +310,7 @@ def run_benchmark(
 def run_scale_factor_benchmark(
     title: str,
     output_dir: Path,
-    curves: list[tuple[str, str, str, bool] | tuple[str, str, str, bool, str]],
+    curves: list[tuple[str, str, bool] | tuple[str, str, bool, str]],
     fixed_noise_std: float,
     scale_values: list[float] | None,
     scale_start: float,
@@ -343,7 +338,6 @@ def run_scale_factor_benchmark(
         (
             label,
             algorithm,
-            error_metric,
             use_normal_coherence,
             classifier,
             fixed_noise_std,
@@ -357,7 +351,7 @@ def run_scale_factor_benchmark(
             max_iterations,
             inner_iterations,
         )
-        for label, algorithm, error_metric, use_normal_coherence, classifier in curves
+        for label, algorithm, use_normal_coherence, classifier in curves
         for scale_factor in scale_grid
         for run_idx in range(runs)
     ]
@@ -375,7 +369,7 @@ def run_scale_factor_benchmark(
 
     summary: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
     summary_rows: list[dict[str, float | int | str | bool]] = []
-    for label, algorithm, error_metric, use_normal_coherence, classifier in curves:
+    for label, algorithm, use_normal_coherence, classifier in curves:
         means: list[float] = []
         stds: list[float] = []
         for scale_factor in scale_grid:
@@ -390,7 +384,6 @@ def run_scale_factor_benchmark(
             summary_rows.append({
                 "curve": label,
                 "algorithm": algorithm,
-                "error_metric": error_metric,
                 "use_normal_coherence": use_normal_coherence,
                 "classifier": classifier,
                 "threshold_scale": scale_factor,
@@ -407,7 +400,7 @@ def run_scale_factor_benchmark(
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["curve", "algorithm", "error_metric", "use_normal_coherence", "classifier", "noise_std", "threshold_scale", "threshold", "run_idx", "metric_value"],
+            fieldnames=["curve", "algorithm", "use_normal_coherence", "classifier", "noise_std", "threshold_scale", "threshold", "run_idx", "metric_value"],
         )
         writer.writeheader()
         writer.writerows(raw_rows)
@@ -445,7 +438,7 @@ def run_scale_factor_benchmark(
 
 # Run one benchmark trial for the outlier sweep with different hypothesis budgets.
 def run_outlier_hypotheses_trial(job: tuple) -> dict[str, float | int | str | bool]:
-    label, algorithm, error_metric, use_normal_coherence, classifier, hypotheses, noise_std, outlier_count, run_idx, base_seed, n_surface_points, threshold_value, threshold_scale, graph_radius, gair_inner_iterations = job
+    label, algorithm, use_normal_coherence, classifier, hypotheses, noise_std, outlier_count, run_idx, base_seed, n_surface_points, threshold_value, threshold_scale, graph_radius, gair_inner_iterations = job
     seed = base_seed + run_idx + 131 * int(outlier_count) + 17 * int(np.log10(max(hypotheses, 1)))
     points, normals, gt_inliers = build_test_cloud(noise_std, n_surface_points, outlier_count, seed)
 
@@ -464,7 +457,6 @@ def run_outlier_hypotheses_trial(job: tuple) -> dict[str, float | int | str | bo
             refined_set_index=np.arange(points.shape[0], dtype=np.int64),
             actual_set_index=np.arange(points.shape[0], dtype=np.int64),
             threshold=threshold,
-            error_metric=error_metric,
             n_iters=hypotheses,
             random_seed=seed,
         )
@@ -479,7 +471,6 @@ def run_outlier_hypotheses_trial(job: tuple) -> dict[str, float | int | str | bo
             max_models=1,
             max_iterations=hypotheses,
             radius=graph_radius,
-            error_metric=error_metric,
             inner_iterations=gair_inner_iterations,
             random_seed=seed,
             use_normal_coherence=use_normal_coherence,
@@ -491,7 +482,6 @@ def run_outlier_hypotheses_trial(job: tuple) -> dict[str, float | int | str | bo
     return {
         "curve": label,
         "algorithm": algorithm,
-        "error_metric": error_metric,
         "use_normal_coherence": use_normal_coherence,
         "classifier": classifier,
         "noise_std": noise_std,
@@ -509,7 +499,7 @@ def run_outlier_hypotheses_trial(job: tuple) -> dict[str, float | int | str | bo
 def run_outlier_hypotheses_benchmark(
     title: str,
     output_dir: Path,
-    curves: list[tuple[str, str, str, bool, str, int]],
+    curves: list[tuple[str, str, bool, str, int]],
     fixed_noise_std: float,
     outlier_values: list[int] | None,
     outlier_start: int,
@@ -536,7 +526,6 @@ def run_outlier_hypotheses_benchmark(
         (
             label,
             algorithm,
-            error_metric,
             use_normal_coherence,
             classifier,
             hypotheses,
@@ -550,7 +539,7 @@ def run_outlier_hypotheses_benchmark(
             graph_radius,
             gair_inner_iterations,
         )
-        for label, algorithm, error_metric, use_normal_coherence, classifier, hypotheses in curves
+        for label, algorithm, use_normal_coherence, classifier, hypotheses in curves
         for outlier_count in outlier_grid
         for run_idx in range(runs)
     ]
@@ -568,7 +557,7 @@ def run_outlier_hypotheses_benchmark(
 
     summary: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
     summary_rows: list[dict[str, float | int | str | bool]] = []
-    for label, algorithm, error_metric, use_normal_coherence, classifier, hypotheses in curves:
+    for label, algorithm, use_normal_coherence, classifier, hypotheses in curves:
         means: list[float] = []
         stds: list[float] = []
         for outlier_count in outlier_grid:
@@ -583,7 +572,6 @@ def run_outlier_hypotheses_benchmark(
             summary_rows.append({
                 "curve": label,
                 "algorithm": algorithm,
-                "error_metric": error_metric,
                 "use_normal_coherence": use_normal_coherence,
                 "classifier": classifier,
                 "hypotheses": int(hypotheses),
@@ -601,7 +589,7 @@ def run_outlier_hypotheses_benchmark(
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["curve", "algorithm", "error_metric", "use_normal_coherence", "classifier", "noise_std", "outlier_count", "hypotheses", "threshold_scale", "threshold", "gair_inner_iterations", "run_idx", "metric_value"],
+            fieldnames=["curve", "algorithm", "use_normal_coherence", "classifier", "noise_std", "outlier_count", "hypotheses", "threshold_scale", "threshold", "gair_inner_iterations", "run_idx", "metric_value"],
         )
         writer.writeheader()
         writer.writerows(raw_rows)

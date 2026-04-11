@@ -29,9 +29,9 @@ USE_MULTIPROCESSING = True
 BASE_SEED = 42
 OUTPUT_DIR = Path("artifacts") / "noise_vs_misclassification_without_normals"
 CURVES = [
-    ("GAIR-RANSAC with normals", "gair-ransac", "first_order", True),
-    ("GAIR-RANSAC without normals", "gair-ransac", "first_order", False),
-    ("RANSAC", "ransac", "first_order", True),
+    ("GAIR-RANSAC with normals", "gair-ransac", True),
+    ("GAIR-RANSAC without normals", "gair-ransac", False),
+    ("RANSAC", "ransac", True),
 ]
 
 

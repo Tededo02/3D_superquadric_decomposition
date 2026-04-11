@@ -39,7 +39,7 @@ MIN_SAMPLE_SIZE = 11
 MAX_SAMPLE_SIZE = 15
 MIN_INLIERS_FLOOR = 11
 MAX_INLIERS_CAP = 15
-INNER_ITERATIONS = 50
+INNER_ITERATIONS = 100
 GRAPH_RADIUS = 0.06
 OUTLIER_MARGIN = 0.10
 BASE_SEED = 94737
@@ -55,7 +55,7 @@ OUTLIER_LABEL_VALUE = -1.0
 GT_LABEL_MATCH_ATOL = 1e-12
 
 METHODS_BY_BUDGET = {
-    500: [      "Ransac","Ransac + LO","Ransac + GC",
+    500: [      "Ransac + LO","Ransac + GC",
         "Ransac + GAIR",
     ],
     #5000: ["Ransac + LO","Ransac + GC","Ransac + GAIR",],
@@ -544,7 +544,6 @@ def run_method(
             max_iterations=iteration_budget,
             sample_size=tuning.sample_size,
             min_inliers=tuning.min_inliers,
-            consensus_metric="radial",
             random_seed=seed,
             min_coverage=MIN_COVERAGE,
         )
@@ -579,7 +578,6 @@ def run_method(
                 min_inliers=tuning.min_inliers,
                 inner_iterations=INNER_ITERATIONS,
                 radius=GRAPH_RADIUS,
-                consensus_metric="radial",
                 random_seed=seed,
                 use_normal_coherence=False,
                 min_coverage=MIN_COVERAGE,
@@ -599,7 +597,6 @@ def run_method(
                 min_inliers=tuning.min_inliers,
                 inner_iterations=INNER_ITERATIONS,
                 radius=GRAPH_RADIUS,
-                consensus_metric="radial",
                 random_seed=seed,
                 use_normal_coherence=True,
                 min_coverage=MIN_COVERAGE,
@@ -671,9 +668,14 @@ def resolve_process_workers() -> int:
         )
 
     workers = int(value)
+
     if workers <= 0:
         raise ValueError(f"PROCESS_WORKERS must be positive, got {PROCESS_WORKERS!r}")
     return workers
+
+
+def emit_status(message: str = "") -> None:
+    print(message, flush=True)
 
 
 def describe_job(job: RunJob) -> str:
@@ -793,50 +795,54 @@ def main(argv: list[str] | None = None):
     )
     process_workers = resolve_process_workers()
     rows = []
+    total_method_runs = sum(len(job.methods) for job in jobs)
+    completed_method_runs = 0
 
-    print(f"point_cloud_dir = {args.pc_dir.expanduser().resolve()}")
-    print(f"found {len(point_cloud_files)} base point cloud(s): {[path.name for path in point_cloud_files]}")
-    print(f"runs = {args.runs}")
-    print(f"max_models = {args.max_models}")
-    print(f"process_workers = {PROCESS_WORKERS!r} -> resolved_workers = {process_workers}")
-    print(
+    emit_status(f"point_cloud_dir = {args.pc_dir.expanduser().resolve()}")
+    emit_status(f"found {len(point_cloud_files)} base point cloud(s): {[path.name for path in point_cloud_files]}")
+    emit_status(f"runs = {args.runs}")
+    emit_status(f"max_models = {args.max_models}")
+    emit_status(f"process_workers = {PROCESS_WORKERS!r} -> resolved_workers = {process_workers}")
+    emit_status(
         "base_dataset_filters = "
         f"noise_std={BASE_REQUIRED_NOISE_STD:g} | outlier_ratio={BASE_REQUIRED_OUTLIER_RATIO:g}"
     )
-    print(
+    emit_status(
         "synthetic_corruption = "
         f"noise_std={noise_std:.4f} | outlier_ratio sweep={outlier_ratios} | "
         "points/normals gaussian noise + uniform bbox outliers"
     )
-    print(
+    emit_status(
         "threshold_rule = "
         f"max({THRESHOLD_FACTOR:.4f} * noise_std, "
         f"{THRESHOLD_SPACING_FACTOR:.4f} * median_nn_distance, "
         f"{MIN_THRESHOLD:.4f})"
     )
-    print(
+    emit_status(
         "ransac_tuning_rule = "
-        "sample_size=clip(round(0.06*N), 12, 20) | "
-        "min_inliers=clip(round(0.15*N), max(sample_size,12), 30) | "
+        f"sample_size=clip(round(0.06*N), {MIN_SAMPLE_SIZE}, {MAX_SAMPLE_SIZE}) | "
+        f"min_inliers=clip(round(0.15*N), max(sample_size,{MIN_INLIERS_FLOOR}), {MAX_INLIERS_CAP}) | "
         "mss_max_pool_fraction=clip(6*sample_size/N, 0.18, 0.35)"
     )
-    print(
+    emit_status(
         "methods_by_budget = "
         + ", ".join(f"{budget}:{list(methods)}" for budget, methods in METHODS_BY_BUDGET.items())
     )
 
     for dataset in dataset_specs:
-        print(
+        emit_status(
             f"base_dataset = {dataset.input_file} | dataset_id = {dataset.dataset_id} | "
             f"base_points = {dataset.base_point_count} | removed_gt_outliers = {dataset.base_gt_outliers_removed}"
         )
-    print(f"total_jobs = {len(jobs)}")
+    emit_status(f"total_jobs = {len(jobs)}")
+    emit_status(f"total_method_runs = {total_method_runs}")
 
     if process_workers == 1:
         for job in jobs:
             job_rows, logs = run_job(job)
             for line in logs:
-                print(line)
+                completed_method_runs += 1
+                emit_status(f"[method {completed_method_runs}/{total_method_runs}] {line}")
             rows.extend(job_rows)
     else:
         with ProcessPoolExecutor(max_workers=process_workers) as executor:
@@ -848,9 +854,11 @@ def main(argv: list[str] | None = None):
                 except Exception as exc:
                     raise RuntimeError(f"Job failed: {describe_job(job)}") from exc
                 for line in logs:
-                    print(line)
+                    completed_method_runs += 1
+                    emit_status(f"[method {completed_method_runs}/{total_method_runs}] {line}")
                 rows.extend(job_rows)
 
+    emit_status(f"writing {len(rows)} row(s) to {output_csv}")
     with output_csv.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
             handle,
@@ -888,7 +896,7 @@ def main(argv: list[str] | None = None):
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\nSaved CSV -> {output_csv}")
+    emit_status(f"\nSaved CSV -> {output_csv}")
     return 0
 
 

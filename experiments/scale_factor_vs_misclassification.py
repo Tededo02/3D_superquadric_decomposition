@@ -32,8 +32,8 @@ USE_MULTIPROCESSING = True
 BASE_SEED = 42
 OUTPUT_DIR = Path("artifacts") / "scale_factor_vs_misclassification"
 CURVES = [
-    ("RANSAC", "ransac", "mix", True),
-    ("GAIR-RANSAC first-order", "gair-ransac", "first_order", True, "misclassification"),
+    ("RANSAC", "ransac", True),
+    ("GAIR-RANSAC", "gair-ransac", True, "misclassification"),
 ]
 
 
