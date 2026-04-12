@@ -1,4 +1,5 @@
 import csv
+import json
 import math
 import sys
 import time
@@ -15,6 +16,8 @@ if str(ROOT) not in sys.path:
 
 from point_cloud_utils import chamfer_distance
 from scipy.spatial import cKDTree
+from src.gair_ransac.ransacov import ransacov
+from src.superquadrics.superquadric_residual import superquadric_radial_residual
 from src.gair_ransac.gair_ransac import gair_ransac
 from src.gair_ransac.ransac import ransac
 from src.superquadrics import superquadric_mesh as supmesh
@@ -22,20 +25,30 @@ from src.superquadrics import superquadric_sampling as samp
 from src.visualizations import visualization as vis
 
 # ── config ────────────────────────────────────────────────────────────────────
-VISUALIZE  = False   # set to False to ski p visualization and run all trials headlessly
+VISUALIZE  = True   # set to False to ski p visualization and run all trials headlessly
 PC_DIR     = ROOT / "src" / "point_clouds"
-THRESHOLD  = 0.2
+THRESHOLD  = 0.9
 GRAPH_RADIUS = 0.06
 MAX_MODELS = 5
 MAX_ITER   = 20
-INNER_ITER = 100
-N_TRIALS   = 50
+INNER_ITER = 20
+N_TRIALS   = 25
 K = 3
 EVAL_SEED  = 42          # fixed so chamfer is comparable across trials
 OUT_DIR    = ROOT / "experiments" / "artifacts" / "final_experiment"
 N_OUTLIERS = 130           # number of random uniform outliers to inject (0 = none)
-NOISE      = 0.01        # gaussian noise std applied to positions and normals (0.0 = none)
+NOISE      = 0.05        # gaussian noise std applied to positions and normals (0.0 = none)
+PC_CONFIGS_PATH = Path(__file__).parent / "pc_configs.json"
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _load_pc_config(pc_stem: str) -> dict:
+    if PC_CONFIGS_PATH.exists():
+        with open(PC_CONFIGS_PATH) as f:
+            all_configs = json.load(f)
+        cfg = dict(all_configs.get("default", {}))
+        cfg.update(all_configs.get(pc_stem, {}))
+        return cfg
+    return {}
 
 
 def corrupt_point_cloud(points, normals, rng):
@@ -80,17 +93,19 @@ def load_point_cloud(path: Path):
 
 def _run_one_worker(args):
     """Top-level wrapper so ProcessPoolExecutor can pickle it."""
-    trial, algo, seed, points, normals, clean_points, n_clean = args
-    result = run_one(points, normals, clean_points, n_clean, algo, seed)
+    trial, algo, seed, points, normals, clean_points, n_clean, pc_cfg = args
+    result = run_one(points, normals, clean_points, n_clean, algo, seed, pc_cfg)
     return trial, algo, seed, result
 
 
-def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int):
+def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int, pc_cfg: dict = {}):
     t0 = time.perf_counter()
+    threshold = pc_cfg.get("threshold", THRESHOLD)
+    mss_used = None
     if algorithm in ("vanilla", "lo-ransac"):
-        models, inliers_masks = ransac(
+        models, inliers_masks, n_local_opts = ransac(
             points,
-            threshold=THRESHOLD,
+            threshold=threshold,
             max_models=MAX_MODELS,
             max_iterations=MAX_ITER,
             inner_iterations=INNER_ITER,
@@ -98,16 +113,19 @@ def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int):
             local_optimization=(algorithm == "lo-ransac"),
         )
     else:
-        models, inliers_masks, _ = gair_ransac(
+        models, inliers_masks, mss_used, n_local_opts = gair_ransac(
             points,
             normals if algorithm == "gair-ransac" else None,
-            threshold=THRESHOLD,
+            threshold=threshold,
             max_models=MAX_MODELS,
             max_iterations=MAX_ITER,
             inner_iterations=INNER_ITER,
             radius=GRAPH_RADIUS,
             min_coverage=0.4,
             random_seed=seed,
+            mss_pts_per_patch=pc_cfg.get("mss_pts_per_patch", 5),
+            mss_voxel_spacing_factor=pc_cfg.get("mss_voxel_spacing_factor", 10),
+            sample_size=pc_cfg.get("mss_sample_size", 50),
         )
     runtime = time.perf_counter() - t0
 
@@ -144,10 +162,11 @@ def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int):
         correctly_classified = 0
         classification_rate  = 0.0
     print(f"    correctly_classified={correctly_classified}/{len(points)}  ({classification_rate*100:.1f}%)")
-    if VISUALIZE:
-        vis.show_mesh_and_points(meshes, pts=points, point_size=5, colors=colors, inlier_mask=inlier_mask, models=models)
+    if VISUALIZE and algorithm in ("gair-ransac", "gc-ransac"):
+        vis.show_mesh_and_points(meshes, pts=points, point_size=5, colors=colors, inlier_mask=inlier_mask, mss_used=mss_used, models=models)
 
-    return {"chamfer": cd, "cd_coverage": cd_coverage, "cd_accuracy": cd_accuracy, "hausdorff": hd, "classification_rate": classification_rate, "runtime_s": runtime, "n_models": len(models), "models": models}
+    n_inliers = int(inlier_mask[:n_clean].sum()) if inlier_mask is not None else 0
+    return {"chamfer": cd, "cd_coverage": cd_coverage, "cd_accuracy": cd_accuracy, "hausdorff": hd, "classification_rate": classification_rate, "runtime_s": runtime, "n_models": len(models), "n_inliers": n_inliers, "n_local_opts": n_local_opts, "models": models}
 
 
 def run_for_pc(pc_file: Path, rng):
@@ -157,7 +176,8 @@ def run_for_pc(pc_file: Path, rng):
     points_clean, normals_clean = load_point_cloud(pc_file)
     n_clean = len(points_clean)
     clean_points = points_clean.copy()
-    print(f"  {n_clean} points loaded")
+    pc_cfg = _load_pc_config(pc_file.stem)
+    print(f"  {n_clean} points loaded  |  config: {pc_cfg}")
 
     # fixed seeds across all outlier levels for comparability
     trial_seeds = [int(rng.integers(0, 2**31)) for _ in range(N_TRIALS)]
@@ -191,7 +211,7 @@ def run_for_pc(pc_file: Path, rng):
         all_candidates = {algo: [] for algo in algorithms}
 
         tasks = [
-            (trial, algo, trial_seeds[trial], points, normals, clean_points, n_clean)
+            (trial, algo, trial_seeds[trial], points, normals, clean_points, n_clean, pc_cfg)
             for trial in range(N_TRIALS)
             for algo in algorithms
         ]
@@ -219,47 +239,69 @@ def run_for_pc(pc_file: Path, rng):
         # save csv
         csv_path = frac_out_dir / "results_sequential.csv"
         with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["algo", "trial", "seed", "outlier_frac", "chamfer", "cd_coverage", "cd_accuracy", "hausdorff", "classification_rate", "runtime_s", "n_models"])
+            writer = csv.DictWriter(f, fieldnames=["algo", "trial", "seed", "outlier_frac", "chamfer", "cd_coverage", "cd_accuracy", "hausdorff", "classification_rate", "runtime_s", "n_models", "n_inliers", "n_local_opts"])
             writer.writeheader()
             writer.writerows(all_results)
         print(f"\nResults saved to {csv_path}")
 
         # ── set-cover ─────────────────────────────────────────────────────────
-        print(f"\n=== set-cover (k_max={K}) ===")
+        cover_threshold = pc_cfg.get("threshold", THRESHOLD)
         cover_results = []
         for algo in algorithms:
             candidates = all_candidates[algo]
             if not candidates:
-                print(f"  {algo}: no candidates, skipping")
                 continue
-            print(f"\n  {algo} — {len(candidates)} candidates")
-            selected_idx = exhaustive_best_cover(candidates, clean_points, k_max=K)
-            selected_models = [candidates[i] for i in selected_idx]
 
-            meshes = [supmesh.superquadric_mesh(m) for m in selected_models]
-            sampled_est, _ = samp.sampling_sq_random(meshes, n_points=4000, seed=EVAL_SEED)
-            est_pts = np.vstack(sampled_est)
+            for method in ["exhaustive", "ransacov"]:
+                print(f"\n=== set-cover [{method}]  {algo} — {len(candidates)} candidates ===")
+                if method == "exhaustive":
+                    selected_idx, n_evals = exhaustive_best_cover(candidates, clean_points, k_max=K)
+                    # count inliers: points within threshold of any selected model
+                    if selected_idx:
+                        inlier_mask = np.zeros(len(clean_points), dtype=bool)
+                        for idx in selected_idx:
+                            res = np.abs(superquadric_radial_residual(candidates[idx], clean_points))
+                            inlier_mask |= (res < cover_threshold)
+                        n_covered = int(inlier_mask.sum())
+                    else:
+                        n_covered = 0
+                else:
+                    selected_idx, n_covered = ransacov(
+                        candidates, clean_points, k=K,
+                        threshold=cover_threshold,
+                        residual_fn=lambda m, pts: np.abs(superquadric_radial_residual(m, pts)),
+                    )
+                    n_evals = len(candidates)  # all candidates evaluated to build P matrix
 
-            cd = chamfer_distance(clean_points, est_pts)
-            tree_est = cKDTree(est_pts)
-            tree_inp = cKDTree(clean_points)
-            d_inp_to_est = tree_est.query(clean_points, k=1)[0]
-            d_est_to_inp = tree_inp.query(est_pts,      k=1)[0]
-            cd_coverage = float(d_inp_to_est.mean())
-            cd_accuracy = float(d_est_to_inp.mean())
-            hd = max(d_inp_to_est.max(), d_est_to_inp.max())
+                if not selected_idx:
+                    print(f"  no models selected")
+                    continue
+                selected_models = [candidates[i] for i in selected_idx]
 
-            print(f"  {algo} | k={len(selected_models)}  CD={cd:.4f}  COV={cd_coverage:.4f}  ACC={cd_accuracy:.4f}  HD={hd:.4f}")
-            cover_results.append({"algo": algo, "outlier_frac": out_frac, "k": len(selected_models), "chamfer": round(cd, 6), "cd_coverage": round(cd_coverage, 6), "cd_accuracy": round(cd_accuracy, 6), "hausdorff": round(hd, 6), "n_candidates": len(candidates)})
+                meshes = [supmesh.superquadric_mesh(m) for m in selected_models]
+                sampled_est, _ = samp.sampling_sq_random(meshes, n_points=4000, seed=EVAL_SEED)
+                est_pts = np.vstack(sampled_est)
 
-            if VISUALIZE:
-                palette = ["lightgreen", "orange", "violet", "cyan", "yellow", "red", "lime", "pink", "gold", "turquoise"]
-                colors = [palette[i % len(palette)] for i in range(len(meshes))]
-                vis.show_mesh_and_points(meshes, pts=clean_points, point_size=5, colors=colors, models=selected_models)
+                cd = chamfer_distance(clean_points, est_pts)
+                tree_est = cKDTree(est_pts)
+                tree_inp = cKDTree(clean_points)
+                d_inp_to_est = tree_est.query(clean_points, k=1)[0]
+                d_est_to_inp = tree_inp.query(est_pts,      k=1)[0]
+                cd_coverage = float(d_inp_to_est.mean())
+                cd_accuracy = float(d_est_to_inp.mean())
+                hd = max(d_inp_to_est.max(), d_est_to_inp.max())
+
+                print(f"  {algo} [{method}] | k={len(selected_models)}  n_covered={n_covered}  n_evals={n_evals}  CD={cd:.4f}  COV={cd_coverage:.4f}  ACC={cd_accuracy:.4f}  HD={hd:.4f}")
+                cover_results.append({"algo": algo, "method": method, "outlier_frac": out_frac, "k": len(selected_models), "n_covered": n_covered, "n_evals": n_evals, "chamfer": round(cd, 6), "cd_coverage": round(cd_coverage, 6), "cd_accuracy": round(cd_accuracy, 6), "hausdorff": round(hd, 6), "n_candidates": len(candidates)})
+
+                if VISUALIZE:
+                    palette = ["lightgreen", "orange", "violet", "cyan", "yellow", "red", "lime", "pink", "gold", "turquoise"]
+                    colors = [palette[i % len(palette)] for i in range(len(meshes))]
+                    vis.show_mesh_and_points(meshes, pts=clean_points, point_size=5, colors=colors, models=selected_models)
 
         csv_cover = frac_out_dir / "results_setcover.csv"
         with open(csv_cover, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["algo", "outlier_frac", "k", "chamfer", "cd_coverage", "cd_accuracy", "hausdorff", "n_candidates"])
+            writer = csv.DictWriter(f, fieldnames=["algo", "method", "outlier_frac", "k", "n_covered", "n_evals", "chamfer", "cd_coverage", "cd_accuracy", "hausdorff", "n_candidates"])
             writer.writeheader()
             writer.writerows(cover_results)
         print(f"Set-cover results saved to {csv_cover}")
@@ -285,18 +327,26 @@ def score_combo(combo_indices, candidates, points):
     return chamfer_distance(points, np.vstack(sampled))
 
 
+MAX_COVER_ITER = 1000
+
+
 def exhaustive_best_cover(candidates, points, k_max):
+    """Returns (selected_indices, n_evals)."""
     n = len(candidates)
     overall_best_score = np.inf
     overall_best_combo = None
     overall_best_k = None
+    total_evals = 0
     for k in range(1, k_max + 1):
         n_combos = math.comb(n, k)
-        print(f"  k={k}  ({n_combos} combinations)")
+        print(f"  k={k}  ({n_combos} combinations, cap={MAX_COVER_ITER})")
         best_score = np.inf
         best_combo = None
-        for combo in combinations(range(n), k):
+        for i, combo in enumerate(combinations(range(n), k)):
+            if i >= MAX_COVER_ITER:
+                break
             score = score_combo(combo, candidates, points)
+            total_evals += 1
             if score < best_score:
                 best_score = score
                 best_combo = combo
@@ -306,7 +356,7 @@ def exhaustive_best_cover(candidates, points, k_max):
             overall_best_combo = best_combo
             overall_best_k = k
     print(f"\n  => best K={overall_best_k}  combo={overall_best_combo}  cd={overall_best_score:.4f}")
-    return list(overall_best_combo)
+    return list(overall_best_combo), total_evals
 
 
 if __name__ == "__main__":

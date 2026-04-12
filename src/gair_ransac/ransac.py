@@ -34,6 +34,7 @@ def ransac(
     remaining_indices: IntArray = np.arange(n_points, dtype=np.int64)
     models_set: list[SuperQuadricParams] = []
     inliers_set: list[BoolArray] = []
+    total_local_opts: int = 0
 
     for _ in range(max_models):
         if remaining_indices.size < max(sample_size, min_inliers):
@@ -69,6 +70,7 @@ def ransac(
             if local_optimization:
                 refined_set_index: IntArray = np.flatnonzero(candidate_inliers).astype(np.int64)
                 if refined_set_index.size >= min_inliers:
+                    total_local_opts += 1
                     inner_result: InnerRansacResult = inner_ransac(
                         current_point_cloud,
                         refined_set_index,
@@ -126,4 +128,4 @@ def ransac(
         remove_mask = expanded_removal_mask(best_model, current_point_cloud, threshold, factor=1.3, error_metric=consensus_metric)
         remaining_indices = remaining_indices[~remove_mask]
 
-    return models_set, inliers_set
+    return models_set, inliers_set, total_local_opts

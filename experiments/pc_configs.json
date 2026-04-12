@@ -1,0 +1,44 @@
+{
+  "default": {
+    "threshold": 0.15,
+    "mss_sample_size": 50,
+    "mss_pts_per_patch": 5,
+    "mss_voxel_spacing_factor": 10
+  },
+  "supersingle0_0_0": {
+    "threshold": 0.6,
+    "mss_sample_size": 30,
+    "mss_pts_per_patch": 3,
+    "mss_voxel_spacing_factor": 40
+  },
+  "supersingle7_0_0": {
+    "threshold": 0.6,
+    "mss_sample_size": 30,
+    "mss_pts_per_patch": 3,
+    "mss_voxel_spacing_factor": 40
+  },
+  "supersingle9_0_0": {
+    "threshold": 0.6,
+    "mss_sample_size": 30,
+    "mss_pts_per_patch": 3,
+    "mss_voxel_spacing_factor": 40
+  },
+  "cat1_0_0": {
+    "threshold": 0.25,
+    "mss_sample_size": 20,
+    "mss_pts_per_patch": 5,
+    "mss_voxel_spacing_factor": 2
+  },
+  "cat2_0_0": {
+    "threshold": 0.45,
+    "mss_sample_size": 20,
+    "mss_pts_per_patch": 5,
+    "mss_voxel_spacing_factor": 3
+  },
+  "peanuts_0_0": {
+    "threshold": 0.3,
+    "mss_sample_size": 30,
+    "mss_pts_per_patch": 5,
+    "mss_voxel_spacing_factor": 3
+  }
+}

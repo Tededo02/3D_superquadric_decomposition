@@ -14,7 +14,7 @@ _PTS_PER_PATCH = 5
 
 # Voxel side = median NN-spacing × this factor (spatial_walk_mss only).
 # Really important, you can choose how big the single voxel cell is
-_VOXEL_SPACING_FACTOR = 3
+_VOXEL_SPACING_FACTOR = 10
 
 # this function is used to spread the sample inside the local pool
 def _farthest_point_indices(
@@ -242,7 +242,9 @@ def spatial_walk_mss(
     D: np.ndarray,
     normals: np.ndarray | None = None,
     primitive_type: str = 'superquadric',
-    sample_size: int = 10,
+    sample_size: int = 50,
+    pts_per_patch: int = _PTS_PER_PATCH,
+    voxel_spacing_factor: int = _VOXEL_SPACING_FACTOR,
     rng: np.random.Generator | None = None,
     random_seed: int | None = None,
 ) -> np.ndarray:
@@ -254,7 +256,6 @@ def spatial_walk_mss(
     sample_size is reached.
 
     """
-    sample_size = 15
     if rng is None:
         rng = np.random.default_rng(random_seed)
 
@@ -271,7 +272,7 @@ def spatial_walk_mss(
 
     # k=2: index 0 is self (dist=0), index 1 is true nearest neighbour
     nn_dists, _ = KDTree(D).query(D, k=2)
-    voxel_size = max(float(np.median(nn_dists[:, 1])) * _VOXEL_SPACING_FACTOR, 1e-9)
+    voxel_size = max(float(np.median(nn_dists[:, 1])) * voxel_spacing_factor, 1e-9)
 
     # assign each point to a voxel (integer grid key)
     voxel_coords = np.floor(D / voxel_size).astype(int)
@@ -303,9 +304,9 @@ def spatial_walk_mss(
             continue
         visited.add(voxel)
 
-        # sample up to _PTS_PER_PATCH new points from this voxel
+        # sample up to pts_per_patch new points from this voxel
         cands = [i for i in voxel_map[voxel] if i not in selected_indices]
-        n_add = min(_PTS_PER_PATCH, len(cands), sample_size - len(selected_indices))
+        n_add = min(pts_per_patch, len(cands), sample_size - len(selected_indices))
         if n_add > 0:
             selected_indices.update(int(i) for i in rng.choice(cands, size=n_add, replace=False))
 

@@ -167,11 +167,10 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
                     pl.add_points(points[~mask], render_points_as_spheres=True, point_size=cloud_point_size, color="#ff1744", opacity=0.8)
             else:
                 pl.add_points(points, render_points_as_spheres=True, point_size=cloud_point_size, color="#1565c0")
-                """
+
         if mss_used is not None:
             mss_points = np.asarray(mss_used, dtype=np.float64).reshape(-1, 3)
             pl.add_points(mss_points, render_points_as_spheres=True, point_size=mss_point_size, color="violet")
-        """
     pl.enable_eye_dome_lighting()
 
     # fixed camera angle (same every run)

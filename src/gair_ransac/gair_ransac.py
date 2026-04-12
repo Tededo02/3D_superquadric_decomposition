@@ -55,8 +55,9 @@ def _sample_superquadric_surface(model: "SuperQuadricParams", n: int = 1000) -> 
     return (pts @ R.T) + model.t
 
 
-def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, threshold: float = 0.1, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 30, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, min_coverage: float = 0.0, use_normal_coherence: bool | None = None) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
+def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, threshold: float = 0.1, max_models: int = 1, max_iterations: int = 300, m_neighbors: int = 12, radius: float = 0.06, radius_is_relative: bool = True, sample_size: int = 50, min_inliers: int = 30, min_gain: int = 1, error_metric: str = "radial", consensus_metric: str = "first_order", inner_iterations: int = 50, random_seed: int | None = None, min_coverage: float = 0.0, use_normal_coherence: bool | None = None, mss_pts_per_patch: int = 5, mss_voxel_spacing_factor: int = 10) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None, int]:
     total_best_mss_used: FloatArray | None = None
+    total_local_opts: int = 0
     min_inliers = 5
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     # if not explicitly set, derive from whether normals are provided
@@ -103,6 +104,8 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, thre
                         current_point_cloud,
                         V_mss,
                         sample_size=sample_size,
+                        pts_per_patch=mss_pts_per_patch,
+                        voxel_spacing_factor=mss_voxel_spacing_factor,
                         rng=rng,
                     ),
                     dtype=np.float64,
@@ -141,6 +144,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, thre
             local_iteration: int = 0
             # Local optimization loop: GAIR + inner RANSAC + consensus comparison
             while not terminate:
+                total_local_opts += 1
                 # Refine the current inlier set with GAIR
                 refined_inliers: BoolArray = np.asarray(
                     gair(
@@ -285,4 +289,4 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray | None = None, thre
         remaining_indices = remaining_indices[~remove_mask]
         
         # Return all extracted models and their global inlier masks
-    return models_set, inliers_set, total_best_mss_used
+    return models_set, inliers_set, total_best_mss_used, total_local_opts
