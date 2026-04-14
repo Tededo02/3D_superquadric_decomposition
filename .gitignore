@@ -220,6 +220,9 @@ artifacts/*
 test_objects/*
 tests/
 images/
+csv_scripts/
+finale/
+paper_graph_scripts/
 
 .gitignore
 .vscode
