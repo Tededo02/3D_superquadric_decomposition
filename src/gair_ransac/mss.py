@@ -122,37 +122,29 @@ def _coherent_local_pool_indices(points: np.ndarray,tree: cKDTree,seed_idx: int,
         return idx[:target_pool_size]
 
     seed_normal = normals[seed_idx]
-    relax_normal = [normal_cos_min, normal_cos_min - 0.2, normal_cos_min - 0.4, -1.0]
-    relax_tangent = [tangent_cos_max, tangent_cos_max + 0.1, tangent_cos_max + 0.2, 1.0]
+    current_k = query_k
+    while True:
+        _, idx = tree.query(seed_point, k=current_k)
+        idx = np.atleast_1d(idx).astype(np.int64, copy=False)
 
-    for normal_thr, tangent_thr in zip(relax_normal, relax_tangent):
-        current_k = query_k
-        while True:
-            _, idx = tree.query(seed_point, k=current_k)
-            idx = np.atleast_1d(idx).astype(np.int64, copy=False)
+        other_idx = idx[idx != seed_idx]
+        if other_idx.size == 0:
+            filtered = np.array([seed_idx], dtype=np.int64)
+        else:
+            disp = points[other_idx] - seed_point
+            dist = np.linalg.norm(disp, axis=1)
+            disp_unit = np.zeros_like(disp)
+            valid = dist > 1e-12
+            disp_unit[valid] = disp[valid] / dist[valid, None]
 
-            other_idx = idx[idx != seed_idx]
-            if other_idx.size == 0:
-                filtered = np.array([seed_idx], dtype=np.int64)
-            else:
-                disp = points[other_idx] - seed_point
-                dist = np.linalg.norm(disp, axis=1)
-                disp_unit = np.zeros_like(disp)
-                valid = dist > 1e-12
-                disp_unit[valid] = disp[valid] / dist[valid, None]
+            normal_align = normals[other_idx] @ seed_normal
+            tangent_align = np.abs(disp_unit @ seed_normal)
+            keep = (normal_align >= normal_cos_min) & (tangent_align <= tangent_cos_max)
+            filtered = np.concatenate(([seed_idx], other_idx[keep]))
 
-                normal_align = normals[other_idx] @ seed_normal
-                tangent_align = np.abs(disp_unit @ seed_normal)
-                keep = (normal_align >= normal_thr) & (tangent_align <= tangent_thr)
-                filtered = np.concatenate(([seed_idx], other_idx[keep]))
-
-            if filtered.size >= target_pool_size or current_k >= n_points:
-                return filtered[:target_pool_size]
-            current_k = min(current_k * 2, n_points)
-
-    _, idx = tree.query(seed_point, k=min(n_points, target_pool_size))
-    idx = np.atleast_1d(idx).astype(np.int64, copy=False)
-    return idx[:target_pool_size]
+        if filtered.size >= target_pool_size or current_k >= n_points:
+            return filtered[:target_pool_size]
+        current_k = min(current_k * 2, n_points)
 
 # This function scores a local sample based on compactness and normal coherence.
 # Lower is better. The compactness term encourages the sample to be spatially tight,
@@ -256,8 +248,7 @@ def adaptive_local_fps_mss(
         )
 
         if pool_idx.size < sample_size:
-            _, fallback_idx = tree.query(points[seed_idx], k=sample_size)
-            pool_idx = np.atleast_1d(fallback_idx).astype(np.int64, copy=False)
+            continue
 
         if pool_idx.size > target_pool_size:
             pool_idx = pool_idx[:target_pool_size]

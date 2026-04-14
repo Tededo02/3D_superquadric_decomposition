@@ -3,6 +3,7 @@ from pathlib import Path
 import pyvista as pv
 import numpy as np
 from src.superquadrics.superquadric_residual import superquadric_radial_residual
+from src.superquadrics import superquadric_mesh as supmesh
 from src.gair_ransac.consensus import expanded_removal_mask
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -97,6 +98,59 @@ def save_point_cloud_inlier_view(
 
     pl.enable_eye_dome_lighting()
     _focus_camera_on_points(pl, points)
+    pl.screenshot(str(image_path))
+    pl.close()
+    return image_path
+
+
+def save_point_cloud_inlier_model_view(
+    points: np.ndarray,
+    inlier_mask: np.ndarray,
+    model,
+    output_path: str | Path,
+    point_size: int = 8,
+    model_color: str = "#64b5f6",
+    model_opacity: float = 0.35,
+) -> Path:
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    mask = np.asarray(inlier_mask, dtype=bool).reshape(-1)
+    if mask.shape[0] != points.shape[0]:
+        raise ValueError(f"inlier_mask must have length {points.shape[0]}, got {mask.shape[0]}")
+
+    image_path = Path(output_path)
+    if not image_path.is_absolute():
+        image_path = PROJECT_ROOT / image_path
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fitted_mesh = supmesh.superquadric_mesh(model)
+    mesh_vertices = np.asarray(fitted_mesh.vertices, dtype=np.float64).reshape(-1, 3)
+    frame_points = points if mesh_vertices.size == 0 else np.vstack((points, mesh_vertices))
+
+    display_point_size = max(point_size * 2, 12)
+    pl = pv.Plotter(off_screen=True, window_size=(1600, 1200))
+    pl.set_background("white")
+
+    _add_meshes_to_plotter(pl, [fitted_mesh], colors=[model_color], opacity=model_opacity)
+
+    if (~mask).any():
+        pl.add_points(
+            points[~mask],
+            render_points_as_spheres=True,
+            point_size=display_point_size / 3,
+            color="black",
+            opacity=0.95,
+        )
+    if mask.any():
+        pl.add_points(
+            points[mask],
+            render_points_as_spheres=True,
+            point_size=display_point_size,
+            color="red",
+            opacity=1.0,
+        )
+
+    pl.enable_eye_dome_lighting()
+    _focus_camera_on_points(pl, frame_points)
     pl.screenshot(str(image_path))
     pl.close()
     return image_path

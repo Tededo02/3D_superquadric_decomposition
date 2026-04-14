@@ -5,6 +5,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from src.superquadrics.superquadric_param import SuperQuadricParams
+from src.visualizations.visualization import (
+    save_point_cloud_inlier_model_view,
+    save_point_cloud_inlier_view,
+)
 
 from .consensus import compute_consensus, expanded_removal_mask
 from .gair import gair
@@ -77,6 +81,7 @@ def gair_ransac(
     min_coverage: float = 0.0,
     use_normal_guided_mss: bool = True,
     mss_max_pool_fraction: float | None = 0.25,
+    save_debug_views: bool = False,
 ) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None]:
     total_best_mss_used: FloatArray | None = None
 
@@ -88,7 +93,7 @@ def gair_ransac(
     models_set: list[SuperQuadricParams] = []
     inliers_set: list[BoolArray] = []
 
-    for _ in range(max_models):
+    for model_idx in range(max_models):
         if remaining_indices.size < max(sample_size, min_inliers):
             break
 
@@ -109,7 +114,7 @@ def gair_ransac(
         sampler_context = build_adaptive_local_fps_sampler_context(current_point_cloud, mss_normals)
         best_mss_used: FloatArray | None = None
 
-        for _ in range(max_iterations):
+        for hypothesis_idx in range(max_iterations):
             sample_points = np.asarray(
                 adaptive_local_fps_mss(
                     current_point_cloud,
@@ -124,9 +129,24 @@ def gair_ransac(
                 ),
                 dtype=np.float64,
             )
+            if save_debug_views:
+                save_point_cloud_inlier_view(
+                    current_point_cloud,
+                    _point_subset_mask(current_point_cloud, sample_points),
+                    IMAGES_DIR / f"gair_ransac_model_{model_idx + 1:02d}_hyp_{hypothesis_idx + 1:03d}_mss.png",
+                )
 
             try:
                 candidate_model = fit_superquadric_ls(sample_points)
+                if save_debug_views:
+                    save_point_cloud_inlier_model_view(
+                        current_point_cloud,
+                        _point_subset_mask(current_point_cloud, sample_points),
+                        candidate_model,
+                        IMAGES_DIR / (
+                            f"gair_ransac_model_{model_idx + 1:02d}_hyp_{hypothesis_idx + 1:03d}_mss_fit.png"
+                        ),
+                    )
             except Exception:
                 continue
 
@@ -149,6 +169,7 @@ def gair_ransac(
             current_inliers = candidate_inliers.copy()
             current_count = candidate_count
             terminate = False
+            local_iteration = 0
 
             while not terminate:
                 refined_inliers = np.asarray(
@@ -163,6 +184,16 @@ def gair_ransac(
                     ),
                     dtype=bool,
                 )
+                local_iteration += 1
+                if save_debug_views:
+                    save_point_cloud_inlier_view(
+                        current_point_cloud,
+                        refined_inliers,
+                        IMAGES_DIR / (
+                            f"gair_ransac_model_{model_idx + 1:02d}_hyp_{hypothesis_idx + 1:03d}_"
+                            f"gair_{local_iteration:02d}.png"
+                        ),
+                    )
 
                 refined_count = int(np.count_nonzero(refined_inliers))
                 if refined_count < min_inliers:
@@ -185,12 +216,21 @@ def gair_ransac(
 
                 new_inliers = np.asarray(inner_result.best_inliers_mask, dtype=bool)
                 if compare_consensus(current_inliers, new_inliers, min_gain=min_gain):
+                    
                     current_inliers = new_inliers
                     current_count = int(np.count_nonzero(new_inliers))
                     current_model = inner_result.best_model
                 else:
                     terminate = True
-
+                    """
+                
+                if compare_consensus(current_inliers, refined_inliers, min_gain=min_gain):
+                    current_inliers = refined_inliers
+                    current_count = int(np.count_nonzero(refined_inliers))
+                    current_model = inner_result.best_model
+                else:
+                    terminate = True
+               """
             if current_count > int(np.count_nonzero(best_inliers)):
                 if current_count >= min_inliers:
                     current_points = current_point_cloud[current_inliers]

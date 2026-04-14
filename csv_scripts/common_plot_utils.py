@@ -24,6 +24,7 @@ plt.rcParams.update({
 
 METHOD_ALIASES = {
     "ransac": "Ransac",
+    "vanilla": "Ransac",
     "vanilla ransac": "Ransac",
     "vanilla-ransac": "Ransac",
     "lo ransac": "Ransac + LO",

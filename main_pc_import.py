@@ -15,21 +15,21 @@ from point_cloud_utils import chamfer_distance
 from src.gair_ransac.gair_ransac import gair_ransac
 
 #THRESHOLD = 0.03
-THRESHOLD_FACTOR = 2.5
-THRESHOLD_SPACING_FACTOR = 0.10
-MIN_THRESHOLD = 0.03
+THRESHOLD_FACTOR = 3
+THRESHOLD_SPACING_FACTOR = 0.5
+MIN_THRESHOLD = 0.01
 MIN_COVERAGE = 0.0
-NOISE_STD = 0.0
+NOISE_STD = 0.02
 PROJECT_ROOT = Path(__file__).resolve().parent
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "cat1_0_0.2.ply"
+PC_FILE = PROJECT_ROOT / "test_objects" / "131969.stl"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
 SAMPLED_POINT_COUNT = 2000
-DEFAULT_BASE_SEED = 424346 #59546 #12345
-MAX_MODELS = 7
+DEFAULT_BASE_SEED = 1234
+MAX_MODELS = 1
 MIN_SAMPLE_SIZE = 12
-MAX_SAMPLE_SIZE = 15
+MAX_SAMPLE_SIZE = 20
 MIN_INLIERS_FLOOR = 11
 MAX_INLIERS_CAP = 12
 SUPPORTED_ALGORITHMS = (
@@ -215,7 +215,7 @@ def get_threshold(
     threshold_from_spacing = 0.0
     if median_nn_distance is not None and median_nn_distance > 0.0:
         threshold_from_spacing = float(THRESHOLD_SPACING_FACTOR) * float(median_nn_distance)
-    return 0.03
+    return max(float(MIN_THRESHOLD), threshold_from_noise, threshold_from_spacing)
 
 
 def resolve_input_path(pc_file: str | Path) -> Path:
@@ -508,6 +508,7 @@ def create_and_estimate_supq(
             sample_size=ransac_tuning.sample_size,
             min_inliers=ransac_tuning.min_inliers,
             mss_max_pool_fraction=ransac_tuning.mss_max_pool_fraction,
+            save_debug_views=visualize,
         )
         if not models:
             print("gair_ransac did not return any model")

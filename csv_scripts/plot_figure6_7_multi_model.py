@@ -15,8 +15,10 @@ from common_plot_utils import save_figure
 
 ROOT = Path(__file__).resolve().parents[1]
 
-CSV_PATH = ROOT / "experiments" / "artifacts" / "figure6_7_multi_model" / "results.csv"
-OUTPUT_PATH = ROOT / "csv_scripts" / "out" / "figure6_7_multi_model.png"
+# Puoi impostare qui sia un file my_results.csv sia una directory come finale/.
+CSV_SOURCE = ROOT / "finale"
+MY_RESULTS_FILENAME = "my_results.csv"
+OUTPUT_PATH = ROOT / "csv_scripts" / "out" / "figure6_7_multi_model"
 DEFAULT_ERROR_METHODS = ["Ransac", "Ransac + LO", "Ransac + GC", "Ransac + GAIR"]
 DEFAULT_TIME_METHODS = ["Ransac + LO", "Ransac + GC", "Ransac + GAIR"]
 DEFAULT_REFINEMENT_METHODS = ["Ransac + LO", "Ransac + GC", "Ransac + GAIR"]
@@ -24,7 +26,12 @@ DEFAULT_REFINEMENT_METHODS = ["Ransac + LO", "Ransac + GC", "Ransac + GAIR"]
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--csv", type=Path, default=CSV_PATH)
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=CSV_SOURCE,
+        help="Path to my_results.csv or to a directory that contains one or more my_results.csv files.",
+    )
     parser.add_argument("--output", type=Path, default=OUTPUT_PATH)
     parser.add_argument("--scenario", default="multi_model")
     parser.add_argument("--iteration-budget", type=int, default=500)
@@ -44,35 +51,61 @@ def warn(message):
     print(f"[WARN] {message}")
 
 
+def resolve_path(path):
+    path = path.expanduser()
+    if path.is_absolute():
+        return path
+    return ROOT / path
+
+
+def resolve_csv_paths(csv_source):
+    csv_source = resolve_path(csv_source)
+
+    if not csv_source.exists():
+        raise FileNotFoundError(f"CSV source not found: {csv_source}")
+
+    if csv_source.is_file():
+        if csv_source.suffix.lower() != ".csv":
+            raise ValueError(f"CSV source must be a .csv file, got {csv_source}")
+        return csv_source, [csv_source]
+
+    csv_paths = sorted(path for path in csv_source.rglob(MY_RESULTS_FILENAME) if path.is_file())
+    if not csv_paths:
+        raise FileNotFoundError(
+            f"No '{MY_RESULTS_FILENAME}' files found under {csv_source}."
+        )
+    return csv_source, csv_paths
+
+
 def ensure_columns(df, required_columns, csv_path):
     missing = [column for column in required_columns if column not in df.columns]
     if missing:
         raise ValueError(f"Missing required columns in {csv_path}: {', '.join(missing)}")
 
 
-def apply_optional_filters(df, args):
+def apply_optional_filters(df, args, source_label):
     filtered = df.copy()
 
     if args.scenario is not None:
         if "scenario" in filtered.columns:
             filtered = filtered[filtered["scenario"] == args.scenario]
         else:
-            warn(f'Column "scenario" is not present in {args.csv.name}; scenario filter ignored.')
+            warn(f'Column "scenario" is not present in {source_label}; scenario filter ignored.')
 
     if args.iteration_budget is not None:
         if "iteration_budget" in filtered.columns:
             filtered = filtered[filtered["iteration_budget"] == args.iteration_budget]
         else:
-            warn(f'Column "iteration_budget" is not present in {args.csv.name}; iteration filter ignored.')
+            warn(f'Column "iteration_budget" is not present in {source_label}; iteration filter ignored.')
 
     if args.dataset_id:
         if "dataset_id" not in filtered.columns:
-            warn(f'Column "dataset_id" is not present in {args.csv.name}; dataset filter ignored.')
+            warn(f'Column "dataset_id" is not present in {source_label}; dataset filter ignored.')
         else:
             filtered = filtered[filtered["dataset_id"].isin(args.dataset_id)]
 
     if filtered.empty:
-        raise ValueError("No rows left after applying the requested filters.")
+        raise ValueError(f"No rows left after applying the requested filters to {source_label}.")
 
     return filtered
 
@@ -115,23 +148,45 @@ def iter_groups(df):
             yield str(dataset_id), group_df
 
 
-def build_output_path(base_output_path, dataset_label, multi_output):
+def build_plot_groups(df):
+    groups = [("all_datasets", df.copy())]
+    for _, group_df in iter_groups(df):
+        groups.append((resolve_dataset_label(group_df), group_df))
+    return groups
+
+
+def build_source_label(csv_path, source_root):
+    if source_root.is_file():
+        return slugify(csv_path.stem)
+
+    relative_parent = csv_path.parent.relative_to(source_root)
+    if relative_parent == Path("."):
+        return slugify(f"{source_root.name}_{csv_path.stem}")
+
+    return slugify("_".join(relative_parent.parts + (csv_path.stem,)))
+
+
+def build_output_path(base_output_path, source_label, dataset_label, multi_source):
     base_output_path = Path(base_output_path)
-    suffix = base_output_path.suffix or ".png"
 
-    if not multi_output:
-        if base_output_path.suffix:
-            return base_output_path
-        return base_output_path.with_suffix(suffix)
+    if base_output_path.suffix:
+        output_dir = base_output_path.parent
+        filename = f"{base_output_path.stem}_{slugify(dataset_label)}{base_output_path.suffix}"
+    else:
+        output_dir = base_output_path
+        filename = f"{slugify(dataset_label)}.png"
 
-    stem = base_output_path.stem if base_output_path.suffix else base_output_path.name
-    filename = f"{stem}_{slugify(dataset_label)}{suffix}"
-    return base_output_path.with_name(filename)
+    if multi_source:
+        output_dir = output_dir / source_label
+
+    return output_dir / filename
 
 
 def build_caption(args, dataset_label):
     if args.caption:
         return args.caption
+    if dataset_label == "all_datasets":
+        return f"Figure {args.figure_number}: Results on all datasets - multi-model."
     pretty_label = str(dataset_label).replace("_", "-")
     return f"Figure {args.figure_number}: Results on {pretty_label} - multi-model."
 
@@ -216,16 +271,7 @@ def render_figure(group_df, args, dataset_label, output_path):
     plt.close(fig)
 
 
-def main():
-    args = parse_args()
-    csv_path = args.csv.expanduser()
-    if not csv_path.is_absolute():
-        csv_path = ROOT / csv_path
-
-    output_path = args.output.expanduser()
-    if not output_path.is_absolute():
-        output_path = ROOT / output_path
-
+def plot_csv(csv_path, source_root, multi_source, args):
     df = load_results(csv_path)
     ensure_columns(
         df,
@@ -238,15 +284,26 @@ def main():
         ],
         csv_path,
     )
-    df = apply_optional_filters(df, args)
+    df = apply_optional_filters(df, args, csv_path.name)
 
-    groups = list(iter_groups(df))
-    multi_output = len(groups) > 1
+    source_label = build_source_label(csv_path, source_root)
+    groups = build_plot_groups(df)
 
-    for _, group_df in groups:
-        dataset_label = resolve_dataset_label(group_df)
-        dataset_output_path = build_output_path(output_path, dataset_label, multi_output)
+    for dataset_label, group_df in groups:
+        dataset_output_path = build_output_path(args.output, source_label, dataset_label, multi_source)
         render_figure(group_df, args, dataset_label, dataset_output_path)
+
+
+def main():
+    args = parse_args()
+    args.output = resolve_path(args.output)
+
+    source_root, csv_paths = resolve_csv_paths(args.csv)
+    multi_source = len(csv_paths) > 1
+
+    warn(f"Loaded {len(csv_paths)} my_results CSV file(s) from {source_root}.")
+    for csv_path in csv_paths:
+        plot_csv(csv_path, source_root, multi_source, args)
 
 
 if __name__ == "__main__":
