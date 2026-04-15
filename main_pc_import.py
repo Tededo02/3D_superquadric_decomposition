@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import trimesh
 import numpy as np
+from scipy.spatial import cKDTree
 from src.superquadrics import superquadric_mesh as supmesh
 from src.visualizations import visualization as vis
 from src.superquadrics import superquadric_sampling as samp
@@ -12,16 +13,24 @@ from src.gair_ransac.ransac import ransac
 from point_cloud_utils import chamfer_distance
 from src.gair_ransac.gair_ransac import gair_ransac
 
-THRESHOLD = 0.1
-NOISE_STD=0.04
+
+THRESHOLD_SCALE = 3.0
+THRESHOLD_SPACING_FACTOR = 0.5
+NOISE_STD=0.0
+THRESHOLD = 0.02#THRESHOLD_SCALE * NOISE_STD
+NOISE_NORMAL_STD=0.0
+GRAPH_RADIUS = 0.06
+SAMPLE_SIZE = 30
+MIN_INLIERS = 30
 PROJECT_ROOT = Path(__file__).resolve().parent
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "131969.stl"
+PC_FILE = PROJECT_ROOT / "test_objects" / "cartoon_character.glb"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
-SAMPLED_POINT_COUNT = 20000
-DEFAULT_BASE_SEED = 12345
-
+SAMPLED_POINT_COUNT = 30000
+DEFAULT_BASE_SEED = 1234567932
+MAX_MODEL = 10
+ALGORITHM = "gair-ransac" # options: "ls", "inner-ransac", "ransac", "gair-ransac", "gc-ransac"
 
 @dataclass(frozen=True)
 class RunSeeds:
@@ -82,11 +91,33 @@ def sample_input_mesh(
         [mesh],
         n_points=n_points,
         noise_std=NOISE_STD,
+        normal_noise_std=NOISE_NORMAL_STD,
         seed=seed,
     )
     sampled_points = np.vstack([np.asarray(sampled_points_list[0], dtype=np.float64),np.asarray(noisy_sampled[0], dtype=np.float64),])
     normals = np.vstack([np.asarray(normals_list[0], dtype=np.float64),np.asarray(noisy_normal[0], dtype=np.float64),])
     return sampled_points, normals
+
+
+def estimate_point_spacing(points: np.ndarray) -> float:
+    point_array = np.asarray(points, dtype=np.float64)
+    if point_array.shape[0] < 2:
+        return 0.0
+
+    tree = cKDTree(point_array)
+    nn_dists, _ = tree.query(point_array, k=2)
+    nn_dists = np.asarray(nn_dists, dtype=np.float64)
+    return float(np.median(nn_dists[:, 1]))
+
+
+def compute_effective_threshold(
+    points: np.ndarray,
+    min_threshold: float = THRESHOLD,
+    spacing_factor: float = THRESHOLD_SPACING_FACTOR,
+) -> tuple[float, float]:
+    point_spacing = estimate_point_spacing(points)
+    effective_threshold = max(float(min_threshold), float(spacing_factor) * point_spacing)
+    return effective_threshold, point_spacing
 
 
 def create_and_estimate_supq(
@@ -108,6 +139,7 @@ def create_and_estimate_supq(
         n_points=SAMPLED_POINT_COUNT,
         seed=run_seeds.input_sampling,
     )
+    effective_threshold, point_spacing = compute_effective_threshold(sampled_points)
 
     print(f"Loaded {sampled_points.shape[0]} points from {mesh_path.name}")
     print(
@@ -118,6 +150,12 @@ def create_and_estimate_supq(
         f"evaluation_sampling={run_seeds.evaluation_sampling}"
     )
     print(f"Sampling | sampled_point_count={SAMPLED_POINT_COUNT}")
+    print(
+        "Consensus | "
+        f"min_threshold={THRESHOLD:.4f} "
+        f"point_spacing={point_spacing:.4f} "
+        f"effective_threshold={effective_threshold:.4f}"
+    )
 
     list_mesh = []
     colors = []
@@ -125,8 +163,8 @@ def create_and_estimate_supq(
     n_gt = 0  # no ground truth meshes
     total_best_mss_used = None
 
-    algorithm = "gc-ransac"
-    max_models = 8 # <-- how many superquadrics to find
+    algorithm = ALGORITHM
+    max_models = MAX_MODEL # <-- how many superquadrics to find
 
     if algorithm == "ls":
         small_sample = sampled_points[:30]
@@ -139,20 +177,20 @@ def create_and_estimate_supq(
             sampled_points,
             refined_set_index=np.arange(sampled_points.shape[0]),
             actual_set_index=None,
-            threshold=THRESHOLD,
+            threshold=effective_threshold,
             random_seed=run_seeds.algorithm,
         )
         models = [theta0.best_model]
         list_mesh.append(supmesh.superquadric_mesh(theta0.best_model))
         colors.append("lightgreen")
     elif algorithm == "ransac":
-        graph_radius = 0.08
+        graph_radius = GRAPH_RADIUS
         models, inliers_masks = ransac(
             sampled_points,
-            threshold=THRESHOLD,
+            threshold=effective_threshold,
             max_models=max_models,
-            max_iterations=10,
-            inner_iterations=40,
+            max_iterations=20,
+            inner_iterations=100,
             radius=graph_radius,
             graphcut=True,
             random_seed=run_seeds.algorithm,
@@ -163,18 +201,21 @@ def create_and_estimate_supq(
             list_mesh.append(supmesh.superquadric_mesh(model))
             colors.append(palette[i % len(palette)])
     elif algorithm in ("gair-ransac", "gc-ransac"):
-        graph_radius = 0.08
+        graph_radius = GRAPH_RADIUS
         models, inliers_masks, total_best_mss_used = gair_ransac(
             sampled_points,
             normals,
-            threshold=THRESHOLD,
+            threshold=effective_threshold,
             max_models=max_models,
-            max_iterations=50,
-            inner_iterations=80,
+            max_iterations=40,
+            inner_iterations=200,
             radius=graph_radius,
             use_normal_coherence=(algorithm == "gair-ransac"),
-            min_coverage=0.4,
+            min_coverage=0.0,
             random_seed=run_seeds.algorithm,
+            sample_size=SAMPLE_SIZE,
+            min_inliers=MIN_INLIERS,
+
         )
         if not models:
             raise RuntimeError("gair_ransac did not return any model")
@@ -219,7 +260,7 @@ def create_and_estimate_supq(
         inlier_mask=inlier_mask,
         mss_used=total_best_mss_used if algorithm in ("gair-ransac", "gc-ransac") else None,
         models=models,
-        treshold=THRESHOLD
+        treshold=effective_threshold
     )
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

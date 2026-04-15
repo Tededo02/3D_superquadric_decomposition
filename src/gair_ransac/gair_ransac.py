@@ -227,7 +227,6 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
 
         # Count inliers of the best model found on the current residual
         best_count: int = int(np.count_nonzero(best_inliers))
-
         # Stop if the model is not supported by enough points
         if best_count < min_inliers:
             break
@@ -290,7 +289,7 @@ def gair_ransac(point_cloud: np.ndarray, normals: np.ndarray, threshold: float, 
             best_model,
             current_point_cloud,
             threshold,
-            factor=1.3,
+            factor=1.2,
             error_metric=consensus_metric,
             normals=V,
         )

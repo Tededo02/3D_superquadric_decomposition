@@ -3,6 +3,7 @@ from pathlib import Path
 import pyvista as pv
 import numpy as np
 from src.superquadrics.superquadric_residual import superquadric_radial_residual
+from src.superquadrics import superquadric_mesh as supmesh
 from src.gair_ransac.consensus import expanded_removal_mask
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -11,6 +12,51 @@ DEFAULT_CAMERA_POSITION = [
     (0.0, 0.0, 0.0),
     (-0.1126909338726822, -0.13171346961495714, 0.9848615716662379),
 ]
+
+
+def _focus_camera_on_points(plotter: pv.Plotter, points: np.ndarray) -> None:
+    if points.size == 0:
+        plotter.camera_position = DEFAULT_CAMERA_POSITION
+        return
+
+    mins = points.min(axis=0)
+    maxs = points.max(axis=0)
+    center = (mins + maxs) / 2.0
+
+    default_position = np.asarray(DEFAULT_CAMERA_POSITION[0], dtype=np.float64)
+    default_focal_point = np.asarray(DEFAULT_CAMERA_POSITION[1], dtype=np.float64)
+    default_view_up = tuple(np.asarray(DEFAULT_CAMERA_POSITION[2], dtype=np.float64))
+
+    view_direction = default_position - default_focal_point
+    norm = np.linalg.norm(view_direction)
+    if norm == 0.0:
+        view_direction = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+        norm = 1.0
+
+    plotter.camera_position = [
+        tuple(center + (view_direction / norm)),
+        tuple(center),
+        default_view_up,
+    ]
+    plotter.reset_camera()
+    plotter.camera.zoom(0.95)
+    plotter.reset_camera_clipping_range()
+
+
+def _add_meshes_to_plotter(
+    plotter: pv.Plotter,
+    meshes: list,
+    colors: np.ndarray | None = None,
+    opacity: float = 0.65,
+) -> None:
+    for i, mesh in enumerate(meshes):
+        faces = np.hstack([
+            np.full((len(mesh.faces), 1), 3, dtype=np.int64),
+            mesh.faces.astype(np.int64),
+        ]).ravel()
+        poly = pv.PolyData(mesh.vertices, faces)
+        mesh_color = None if colors is None else colors[i]
+        plotter.add_mesh(poly, smooth_shading=True, opacity=opacity, color=mesh_color)
 
 
 def save_point_cloud_inlier_view(
@@ -51,7 +97,60 @@ def save_point_cloud_inlier_view(
         )
 
     pl.enable_eye_dome_lighting()
-    pl.camera_position = DEFAULT_CAMERA_POSITION
+    _focus_camera_on_points(pl, points)
+    pl.screenshot(str(image_path))
+    pl.close()
+    return image_path
+
+
+def save_point_cloud_inlier_model_view(
+    points: np.ndarray,
+    inlier_mask: np.ndarray,
+    model,
+    output_path: str | Path,
+    point_size: int = 8,
+    model_color: str = "#64b5f6",
+    model_opacity: float = 0.35,
+) -> Path:
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    mask = np.asarray(inlier_mask, dtype=bool).reshape(-1)
+    if mask.shape[0] != points.shape[0]:
+        raise ValueError(f"inlier_mask must have length {points.shape[0]}, got {mask.shape[0]}")
+
+    image_path = Path(output_path)
+    if not image_path.is_absolute():
+        image_path = PROJECT_ROOT / image_path
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fitted_mesh = supmesh.superquadric_mesh(model)
+    mesh_vertices = np.asarray(fitted_mesh.vertices, dtype=np.float64).reshape(-1, 3)
+    frame_points = points if mesh_vertices.size == 0 else np.vstack((points, mesh_vertices))
+
+    display_point_size = max(point_size * 2, 12)
+    pl = pv.Plotter(off_screen=True, window_size=(1600, 1200))
+    pl.set_background("white")
+
+    _add_meshes_to_plotter(pl, [fitted_mesh], colors=[model_color], opacity=model_opacity)
+
+    if (~mask).any():
+        pl.add_points(
+            points[~mask],
+            render_points_as_spheres=True,
+            point_size=display_point_size / 3,
+            color="black",
+            opacity=0.95,
+        )
+    if mask.any():
+        pl.add_points(
+            points[mask],
+            render_points_as_spheres=True,
+            point_size=display_point_size,
+            color="red",
+            opacity=1.0,
+        )
+
+    pl.enable_eye_dome_lighting()
+    _focus_camera_on_points(pl, frame_points)
     pl.screenshot(str(image_path))
     pl.close()
     return image_path
@@ -68,9 +167,6 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
 
 
     # --- aggiungi tutte le mesh ---
-    all_vertices = []
-    total_faces = 0
-    i:int=0
     points = None if pts is None else np.asarray(pts, dtype=np.float64).reshape(-1, 3)
     error_inlier = None
     remaining_mask = None
@@ -96,23 +192,10 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
                 points[current_indices],
                 treshold,
                 factor=1.3,
-                error_metric="radial",
             )
             remaining_mask[current_indices[remove_mask]] = False
 
-    for mesh in meshes:
-
-        faces = np.hstack([
-            np.full((len(mesh.faces), 1), 3, dtype=np.int64),
-            mesh.faces.astype(np.int64)
-        ]).ravel() 
-        poly = pv.PolyData(mesh.vertices, faces)
-        #lightblue
-        pl.add_mesh(poly, smooth_shading=True, opacity=0.65,color=colors[i])
-
-        all_vertices.append(np.asarray(mesh.vertices))
-        total_faces += len(mesh.faces)
-        i+=1
+    _add_meshes_to_plotter(pl, meshes, colors=colors, opacity=0.65)
 
     # --- punti (se presenti) ---
     n_points_total = 0
@@ -178,4 +261,10 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
     pl.camera_position = DEFAULT_CAMERA_POSITION
 
     pl.show()
-    #print(pl.camera_position)
+
+    mesh_only_plotter = pv.Plotter()
+    mesh_only_plotter.set_background("white")
+    _add_meshes_to_plotter(mesh_only_plotter, meshes, colors=colors, opacity=0.65)
+    mesh_only_plotter.enable_eye_dome_lighting()
+    mesh_only_plotter.camera_position = DEFAULT_CAMERA_POSITION
+    mesh_only_plotter.show()
