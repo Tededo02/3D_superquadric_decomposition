@@ -17,17 +17,18 @@ from src.gair_ransac.gair_ransac import gair_ransac
 #THRESHOLD = 0.03
 THRESHOLD_FACTOR = 3
 THRESHOLD_SPACING_FACTOR = 0.5
-MIN_THRESHOLD = 0.01
+MIN_THRESHOLD = 0.02
 MIN_COVERAGE = 0.0
-NOISE_STD = 0.02
+NOISE_STD = 0.015
+DEBUG_V = False
 PROJECT_ROOT = Path(__file__).resolve().parent
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "131969.stl"
+PC_FILE = PROJECT_ROOT / "test_objects" / "cartoon_character.glb"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
-SAMPLED_POINT_COUNT = 2000
+SAMPLED_POINT_COUNT = 20000
 DEFAULT_BASE_SEED = 1234
-MAX_MODELS = 1
+MAX_MODELS = 10
 MIN_SAMPLE_SIZE = 12
 MAX_SAMPLE_SIZE = 20
 MIN_INLIERS_FLOOR = 11
@@ -356,7 +357,9 @@ def create_and_estimate_supq(
     algorithm: str = "gair-ransac",
     base_seed: int = DEFAULT_BASE_SEED,
     visualize: bool = True,
+    save_debug_views: bool = False,
 ):
+    save_debug_views= DEBUG_V
     # --- load point cloud from file ---
     algorithm = normalize_algorithm_name(algorithm)
     run_seeds = build_run_seeds(base_seed)
@@ -508,7 +511,7 @@ def create_and_estimate_supq(
             sample_size=ransac_tuning.sample_size,
             min_inliers=ransac_tuning.min_inliers,
             mss_max_pool_fraction=ransac_tuning.mss_max_pool_fraction,
-            save_debug_views=visualize,
+            save_debug_views=save_debug_views,
         )
         if not models:
             print("gair_ransac did not return any model")
@@ -624,6 +627,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Skip the PyVista visualization window.",
     )
+    parser.add_argument(
+        "--save-debug-views",
+        action="store_true",
+        help=(
+            "Save intermediate PyVista debug images during GAIR-RANSAC. "
+            "Disabled by default because off-screen rendering can emit noisy "
+            "macOS CoreAnalytics warnings."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -637,6 +649,7 @@ def main(argv: list[str] | None = None) -> int:
         algorithm=args.algorithm,
         base_seed=args.seed,
         visualize=not args.no_visualize,
+        save_debug_views=args.save_debug_views,
     )
     summary_parts = [
         "Summary |",

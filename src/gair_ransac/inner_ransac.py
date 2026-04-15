@@ -54,8 +54,9 @@ def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
         a1=float(semi_axes[0]),
         a2=float(semi_axes[1]),
         a3=float(semi_axes[2]),
-        e1=1.0,
-        e2=1.0,
+        # use a slightly spherical initial shape to improve stability 
+        e1=1.8,
+        e2=1.8,
         rot=np.array([yaw, pitch, roll], dtype=np.float64),
         t=center.astype(np.float64, copy=False),
     )
