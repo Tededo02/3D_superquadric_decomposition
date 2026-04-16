@@ -20,15 +20,16 @@ THRESHOLD_SPACING_FACTOR = 0.5
 MIN_THRESHOLD = 0.02
 MIN_COVERAGE = 0.0
 NOISE_STD = 0.015
-DEBUG_V = False
+DEBUG_V = True
 PROJECT_ROOT = Path(__file__).resolve().parent
+OBJECT_VIEWS_DIR = PROJECT_ROOT / "im_obj"
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "cartoon_character.glb"
+PC_FILE = PROJECT_ROOT / "test_objects" / "anthropomorphic_mushroom_character.glb"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
-SAMPLED_POINT_COUNT = 20000
-DEFAULT_BASE_SEED = 1234
-MAX_MODELS = 10
+SAMPLED_POINT_COUNT = 2000
+DEFAULT_BASE_SEED = 12345#1234
+MAX_MODELS = 1
 MIN_SAMPLE_SIZE = 12
 MAX_SAMPLE_SIZE = 20
 MIN_INLIERS_FLOOR = 11
@@ -359,7 +360,7 @@ def create_and_estimate_supq(
     visualize: bool = True,
     save_debug_views: bool = False,
 ):
-    save_debug_views= DEBUG_V
+    save_debug_views = bool(save_debug_views or DEBUG_V)
     # --- load point cloud from file ---
     algorithm = normalize_algorithm_name(algorithm)
     run_seeds = build_run_seeds(base_seed)
@@ -501,7 +502,7 @@ def create_and_estimate_supq(
             normals,
             threshold=threshold,
             max_models=max_models,
-            max_iterations=20,
+            max_iterations=3,
             inner_iterations=100,
             radius=graph_radius,
             use_normal_coherence=use_normal_coherence,
@@ -562,6 +563,7 @@ def create_and_estimate_supq(
 
     cd = None
     one_sided_cd = None
+    saved_object_view_paths: list[Path] = []
     if list_mesh:
         sampled_estimated, _ = samp.sampling_sq(
             list_mesh,
@@ -573,6 +575,27 @@ def create_and_estimate_supq(
         print(f"reconstruction chamfer = {cd:.4f}")
         one_sided_cd = float(cKDTree(sample_from_supq_estimated).query(sampled_points, k=1)[0].mean())
         print(f"reconstruction one-sided chamfer = {one_sided_cd:.4f}")
+        output_stem = f"{input_path.stem}_{algorithm}_seed{run_seeds.base}"
+        saved_object_view_paths = vis.save_mesh_view_triplet(
+            list_mesh,
+            output_dir=OBJECT_VIEWS_DIR,
+            output_stem=output_stem,
+            pts=sampled_points,
+            point_size=5,
+            colors=colors,
+            inlier_mask=inlier_mask,
+            mss_used=(
+                total_best_mss_used
+                if algorithm in ("gair-ransac", "gc-ransac", "gair-mss-no-normals", "gc-mss-no-normals")
+                else None
+            ),
+            models=models,
+            treshold=threshold,
+        )
+        print(
+            f"Saved {len(saved_object_view_paths)} fitted-object views in "
+            f"{saved_object_view_paths[0].parent}"
+        )
 
     if visualize:
         vis.show_mesh_and_points(
@@ -601,6 +624,8 @@ def create_and_estimate_supq(
         "input_noise_std": float(algorithm_noise_std),
         "chamfer": None if cd is None else float(cd),
         "one_sided_chamfer": None if one_sided_cd is None else float(one_sided_cd),
+        "saved_object_views_dir": str(OBJECT_VIEWS_DIR) if saved_object_view_paths else None,
+        "saved_object_views_count": int(len(saved_object_view_paths)),
         "n_inliers": n_inliers,
         "n_outliers": n_outliers,
         "outlier_ratio": outlier_ratio,

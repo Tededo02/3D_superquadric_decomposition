@@ -29,6 +29,9 @@ METHOD_ALIASES = {
     "vanilla-ransac": "Ransac",
     "lo ransac": "Ransac + LO",
     "lo-ransac": "Ransac + LO",
+    "local opt": "Local Opt",
+    "local-opt": "Local Opt",
+    "local optimization": "Local Opt",
     "gc ransac": "Ransac + GC",
     "gc-ransac": "Ransac + GC",
     "gair ransac": "Ransac + GAIR",
@@ -39,18 +42,33 @@ METHOD_ALIASES = {
 STYLE_MAP = {
     "Ransac": {"line": "#5DAE61", "fill": "#0F8A20"},
     "Ransac + LO": {"line": "#B45AC7", "fill": "#8A0FA8"},
+    "Local Opt": {"line": "#9C755F", "fill": "#D6B89C"},
     "Ransac + GAIR": {"line": "#F0A202", "fill": "#F0A202"},
     "Ransac + GC": {"line": "#377EB8", "fill": "#377EB8"},
 }
 
 
-STYLE_ORDER = ["Ransac", "Ransac + LO", "Ransac + GC", "Ransac + GAIR"]
+STYLE_ORDER = ["Ransac", "Ransac + LO", "Local Opt", "Ransac + GC", "Ransac + GAIR"]
+FALLBACK_STYLE_CYCLE = [
+    {"line": "#4C78A8", "fill": "#A0CBE8"},
+    {"line": "#F58518", "fill": "#FFBF79"},
+    {"line": "#54A24B", "fill": "#A7D89A"},
+    {"line": "#E45756", "fill": "#F2A7A4"},
+    {"line": "#72B7B2", "fill": "#B6E0DC"},
+]
 
 
 def normalize_method(value):
     key = str(value).strip().lower().replace("_", " ")
     key = " ".join(key.split())
     return METHOD_ALIASES.get(key, str(value).strip())
+
+
+def get_method_style(method):
+    if method in STYLE_MAP:
+        return STYLE_MAP[method]
+    index = abs(hash(method)) % len(FALLBACK_STYLE_CYCLE)
+    return FALLBACK_STYLE_CYCLE[index]
 
 
 def load_results(csv_path):
@@ -80,7 +98,7 @@ def pick_methods(df, methods=None):
 def build_method_legend(methods):
     handles = []
     for method in methods:
-        color = STYLE_MAP[method]["line"]
+        color = get_method_style(method)["line"]
         handles.append(Line2D([0], [0], color=color, lw=1.0, label=method))
     return handles
 
@@ -88,10 +106,10 @@ def build_method_legend(methods):
 def build_violin_legend(methods):
     handles = []
     for method in methods:
-        style = STYLE_MAP[method]
+        style = get_method_style(method)
         handles.append(Line2D([0], [0], color=style["line"], lw=1.0, label=method))
     for method in methods:
-        style = STYLE_MAP[method]
+        style = get_method_style(method)
         handles.append(Patch(facecolor=style["fill"], alpha=0.30, edgecolor="none", label=f"{method} Violin"))
     return handles
 
@@ -123,7 +141,7 @@ def draw_overlapping_violins(
         return
 
     for method in methods:
-        style = STYLE_MAP[method]
+        style = get_method_style(method)
         chunks = []
         positions = []
         centers = []
@@ -195,7 +213,7 @@ def draw_numeric_violins(ax, df, x_col, y_col, methods, x_label, y_label, title,
         if not chunks:
             continue
 
-        style = STYLE_MAP[method]
+        style = get_method_style(method)
         violin = ax.violinplot(chunks, positions=method_x, widths=width, showextrema=True)
         for body in violin["bodies"]:
             body.set_facecolor(style["fill"])
@@ -224,7 +242,7 @@ def draw_category_violins(ax, df, y_col, methods, y_label, title, central="mean"
         if len(values) == 0:
             continue
 
-        style = STYLE_MAP[method]
+        style = get_method_style(method)
         violin = ax.violinplot([values], positions=[pos], widths=0.55, showextrema=True)
         for body in violin["bodies"]:
             body.set_facecolor(style["fill"])
@@ -244,19 +262,30 @@ def draw_category_violins(ax, df, y_col, methods, y_label, title, central="mean"
     ax.grid(False)
 
 
-def draw_scatter_with_pareto(ax, df, methods, x_col, y_col, x_label, y_label, title, point_size=18):
+def draw_scatter_with_pareto(
+    ax,
+    df,
+    methods,
+    x_col,
+    y_col,
+    x_label,
+    y_label,
+    title,
+    point_size=18,
+    show_pareto=True,
+):
     for method in methods:
         subset = df[df["method"] == method].dropna(subset=[x_col, y_col])
         if subset.empty:
             continue
 
-        style = STYLE_MAP[method]
+        style = get_method_style(method)
         x_values = subset[x_col].to_numpy(dtype=float)
         y_values = subset[y_col].to_numpy(dtype=float)
         ax.scatter(x_values, y_values, color=style["line"], s=point_size, marker=".", alpha=0.95, label=method, zorder=3)
 
         pareto = compute_pareto_front(x_values, y_values)
-        if len(pareto) > 0:
+        if show_pareto and len(pareto) > 0:
             ax.plot(
                 pareto[:, 0],
                 pareto[:, 1],

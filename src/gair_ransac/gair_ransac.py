@@ -133,7 +133,7 @@ def gair_ransac(
                 save_point_cloud_inlier_view(
                     current_point_cloud,
                     _point_subset_mask(current_point_cloud, sample_points),
-                    IMAGES_DIR / f"gair_ransac_model_{model_idx + 1:02d}_hyp_{hypothesis_idx + 1:03d}_mss.png",
+                    IMAGES_DIR / f"initial_sample_{model_idx + 1:02d}_hyp_{hypothesis_idx + 1:03d}_mss.png",
                 )
 
             try:
@@ -144,7 +144,7 @@ def gair_ransac(
                         _point_subset_mask(current_point_cloud, sample_points),
                         candidate_model,
                         IMAGES_DIR / (
-                            f"gair_ransac_model_{model_idx + 1:02d}_hyp_{hypothesis_idx + 1:03d}_mss_fit.png"
+                            f"first_fit_{model_idx + 1:02d}_hyp_{hypothesis_idx + 1:03d}_mss_fit.png"
                         ),
                     )
             except Exception:
@@ -190,8 +190,8 @@ def gair_ransac(
                         current_point_cloud,
                         refined_inliers,
                         IMAGES_DIR / (
-                            f"gair_ransac_model_{model_idx + 1:02d}_hyp_{hypothesis_idx + 1:03d}_"
-                            f"gair_{local_iteration:02d}.png"
+                            f"inlier_refinement_{model_idx + 1:02d}_hyp_{hypothesis_idx + 1:03d}_"
+                            f"gair_refinement_{local_iteration:02d}.png"
                         ),
                     )
 
@@ -213,8 +213,18 @@ def gair_ransac(
                 if inner_result.best_inlier_count <= 0:
                     terminate = True
                     continue
-
                 new_inliers = np.asarray(inner_result.best_inliers_mask, dtype=bool)
+                if save_debug_views:
+                    save_point_cloud_inlier_model_view(
+                        current_point_cloud,
+                        _point_subset_mask(current_point_cloud, inner_result.best_inliers_mask),
+                        inner_result.best_model,
+                        IMAGES_DIR / (
+                            f"innerRansac_{model_idx + 1:02d}_hyp_{hypothesis_idx + 1:03d}_mss_fit.png"
+                        ),
+                    )
+
+
                 if compare_consensus(current_inliers, new_inliers, min_gain=min_gain):
                     
                     current_inliers = new_inliers
@@ -263,6 +273,15 @@ def gair_ransac(
                     ),
                     dtype=bool,
                 )
+                if save_debug_views:
+                    save_point_cloud_inlier_model_view(
+                        current_point_cloud,
+                        _point_subset_mask(current_point_cloud, refit_inliers),
+                        refit_model,
+                        IMAGES_DIR / (
+                            f"gair_ransac_model_{model_idx + 1:02d}_finale_{hypothesis_idx + 1:03d}_fit.png"
+                        ),
+                    )
                 refit_count = int(np.count_nonzero(refit_inliers))
                 if refit_count >= best_count and model_matches_support_scale(
                     refit_model,
@@ -284,7 +303,6 @@ def gair_ransac(
             dists, _ = tree_inliers.query(surface_samples, k=1)
             coverage = float((dists < threshold).mean())
             if coverage < min_coverage:
-                remaining_indices = remaining_indices[~best_inliers]
                 continue
 
         global_inliers: BoolArray = np.zeros(n_points, dtype=bool)
