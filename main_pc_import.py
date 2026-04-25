@@ -15,25 +15,25 @@ from point_cloud_utils import chamfer_distance
 from src.gair_ransac.gair_ransac import gair_ransac
 
 #THRESHOLD = 0.03
-M_NEIGHBORS = 4
+M_NEIGHBORS = 6
 THRESHOLD_FACTOR = 3
 THRESHOLD_SPACING_FACTOR = 0.5
-MIN_THRESHOLD = 0.02
+MIN_THRESHOLD = 0.035
 MIN_COVERAGE = 0.0
-NOISE_STD = 0.15
+NOISE_STD = 0.015
 DEBUG_V = False
 PROJECT_ROOT = Path(__file__).resolve().parent
 OBJECT_VIEWS_DIR = PROJECT_ROOT / "im_obj"
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "99992.stl"
+PC_FILE = PROJECT_ROOT / "test_objects" / "131969.stl"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
-SAMPLED_POINT_COUNT = 1000
-DEFAULT_BASE_SEED = 1234#1234
+SAMPLED_POINT_COUNT = 4000
+DEFAULT_BASE_SEED = 12345#1234
 MAX_MODELS = 10
-MIN_SAMPLE_SIZE = 11
-MAX_SAMPLE_SIZE = 11
-MIN_INLIERS_FLOOR = 11
+MIN_SAMPLE_SIZE = 10
+MAX_SAMPLE_SIZE = 20
+MIN_INLIERS_FLOOR = 5
 MAX_INLIERS_CAP = 12
 SUPPORTED_ALGORITHMS = (
     "ls",
@@ -44,6 +44,11 @@ SUPPORTED_ALGORITHMS = (
     "gair-mss-no-normals",
     "gc-mss-no-normals",
 )
+PYVISTA_CAMERA_POSITION = [
+    (9.38230319524604, 3.7942846282426563, 6.294340545028417),
+    (0.0, 0.0, 0.0),
+    (-0.18140538052646699, 0.9380912113821817, -0.2950880665895499),
+]
 
 
 @dataclass(frozen=True)
@@ -421,6 +426,15 @@ def create_and_estimate_supq(
         f"mss_max_pool_fraction={ransac_tuning.mss_max_pool_fraction:.2f} "
         f"min_coverage={MIN_COVERAGE:.2f}"
     )
+    """
+    if visualize:
+        vis.show_point_cloud(
+            sampled_points,
+            point_size=5,
+            camera_position=PYVISTA_CAMERA_POSITION,
+            print_camera_on_close=True,
+        )
+    """
     gt_n_inliers = None
     gt_n_outliers = None
     gt_classification_rate = None
@@ -610,7 +624,9 @@ def create_and_estimate_supq(
             inlier_mask=inlier_mask,
             mss_used=total_best_mss_used if algorithm in ("gair-ransac", "gc-ransac", "gair-mss-no-normals", "gc-mss-no-normals") else None,
             models=models,
-            treshold=threshold
+            treshold=threshold,
+            print_camera_on_close=True,
+            camera_position=PYVISTA_CAMERA_POSITION,
         )
 
     result = {

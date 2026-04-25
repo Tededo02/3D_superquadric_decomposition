@@ -221,6 +221,34 @@ def _focus_camera_on_points(plotter: pv.Plotter, points: np.ndarray) -> None:
     plotter.reset_camera_clipping_range()
 
 
+def _print_camera_position(label: str, camera_position) -> None:
+    if camera_position is None:
+        print(f"{label}: unavailable")
+        return
+
+    try:
+        camera_rows = [
+            tuple(float(component) for component in row)
+            for row in camera_position
+        ]
+    except (TypeError, ValueError):
+        print(f"{label}: {camera_position}")
+        return
+
+    print(f"{label}: [")
+    for row in camera_rows:
+        print(f"    {row},")
+    print("]")
+
+
+def _resolve_camera_position(camera_position, frame_points: np.ndarray):
+    if camera_position is not None:
+        return camera_position
+
+    camera_positions = _build_camera_positions(frame_points, n_views=3)
+    return camera_positions[0] if camera_positions else DEFAULT_CAMERA_POSITION
+
+
 def _add_meshes_to_plotter(
     plotter: pv.Plotter,
     meshes: list,
@@ -347,6 +375,29 @@ def _populate_mesh_and_points_plotter(
 
     plotter.enable_eye_dome_lighting()
     return _collect_frame_points(meshes, points)
+
+
+def show_point_cloud(
+    pts: np.ndarray,
+    point_size: int = 8,
+    camera_position=None,
+    print_camera_on_close: bool = False,
+) -> None:
+    points = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
+    pl = pv.Plotter()
+    pl.set_background("white")
+    pl.add_points(
+        points,
+        render_points_as_spheres=True,
+        point_size=max(point_size * 2, 12),
+        color="#1565c0",
+    )
+    pl.enable_eye_dome_lighting()
+    pl.camera_position = _resolve_camera_position(camera_position, points)
+
+    returned_camera_position = pl.show(return_cpos=print_camera_on_close)
+    if print_camera_on_close:
+        _print_camera_position("PyVista camera position (point cloud)", returned_camera_position)
 
 
 def save_point_cloud_inlier_view(
@@ -510,7 +561,9 @@ def save_mesh_view_triplet(
 
 def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bounds=True,colors: np.ndarray = None, inlier_mask: np.ndarray = None,mss_used: np.ndarray = None,
         models=None,
-        treshold=0.1
+        treshold=0.1,
+        print_camera_on_close: bool = False,
+        camera_position=None,
     ) -> None:
 
     # --- plotter ---
@@ -527,10 +580,12 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
         treshold=treshold,
         include_points=True,
     )
-    camera_positions = _build_camera_positions(frame_points, n_views=3)
-    pl.camera_position = camera_positions[0] if camera_positions else DEFAULT_CAMERA_POSITION
+    initial_camera_position = _resolve_camera_position(camera_position, frame_points)
+    pl.camera_position = initial_camera_position
 
-    pl.show()
+    returned_camera_position = pl.show(return_cpos=print_camera_on_close)
+    if print_camera_on_close:
+        _print_camera_position("PyVista camera position (points + meshes)", returned_camera_position)
 
     mesh_only_plotter = pv.Plotter()
     _populate_mesh_and_points_plotter(
@@ -545,5 +600,7 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
         treshold=treshold,
         include_points=False,
     )
-    mesh_only_plotter.camera_position = camera_positions[0] if camera_positions else DEFAULT_CAMERA_POSITION
-    mesh_only_plotter.show()
+    mesh_only_plotter.camera_position = initial_camera_position
+    returned_camera_position = mesh_only_plotter.show(return_cpos=print_camera_on_close)
+    if print_camera_on_close:
+        _print_camera_position("PyVista camera position (meshes only)", returned_camera_position)
