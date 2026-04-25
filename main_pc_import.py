@@ -15,6 +15,7 @@ from point_cloud_utils import chamfer_distance
 from src.gair_ransac.gair_ransac import gair_ransac
 
 #THRESHOLD = 0.03
+M_NEIGHBORS = 4
 THRESHOLD_FACTOR = 3
 THRESHOLD_SPACING_FACTOR = 0.5
 MIN_THRESHOLD = 0.02
@@ -24,14 +25,14 @@ DEBUG_V = True
 PROJECT_ROOT = Path(__file__).resolve().parent
 OBJECT_VIEWS_DIR = PROJECT_ROOT / "im_obj"
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "anthropomorphic_mushroom_character.glb"
+PC_FILE = PROJECT_ROOT / "test_objects" / "99992.stl"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
-SAMPLED_POINT_COUNT = 2000
-DEFAULT_BASE_SEED = 12345#1234
-MAX_MODELS = 1
-MIN_SAMPLE_SIZE = 12
-MAX_SAMPLE_SIZE = 20
+SAMPLED_POINT_COUNT = 3000
+DEFAULT_BASE_SEED = 1234#1234
+MAX_MODELS = 10
+MIN_SAMPLE_SIZE = 11
+MAX_SAMPLE_SIZE = 11
 MIN_INLIERS_FLOOR = 11
 MAX_INLIERS_CAP = 12
 SUPPORTED_ALGORITHMS = (
@@ -513,6 +514,7 @@ def create_and_estimate_supq(
             min_inliers=ransac_tuning.min_inliers,
             mss_max_pool_fraction=ransac_tuning.mss_max_pool_fraction,
             save_debug_views=save_debug_views,
+            m_neighbors=M_NEIGHBORS
         )
         if not models:
             print("gair_ransac did not return any model")

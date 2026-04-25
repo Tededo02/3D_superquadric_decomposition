@@ -222,6 +222,8 @@ test_objects/*
 tests/
 images/
 finale/
+im_obj/
+out2/
 out/
 paper_graph_scripts/
 .gitignore

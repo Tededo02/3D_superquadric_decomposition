@@ -321,7 +321,7 @@ def gair_ransac(
             best_model,
             current_point_cloud,
             threshold,
-            factor=1.0,
+            factor=3.0,
             normals=current_normals,
         )
         remaining_indices = remaining_indices[~remove_mask]
