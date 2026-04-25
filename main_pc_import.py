@@ -20,15 +20,15 @@ THRESHOLD_FACTOR = 3
 THRESHOLD_SPACING_FACTOR = 0.5
 MIN_THRESHOLD = 0.02
 MIN_COVERAGE = 0.0
-NOISE_STD = 0.015
-DEBUG_V = True
+NOISE_STD = 0.15
+DEBUG_V = False
 PROJECT_ROOT = Path(__file__).resolve().parent
 OBJECT_VIEWS_DIR = PROJECT_ROOT / "im_obj"
 """anthropomorphic_mushroom_character.glb"""
 PC_FILE = PROJECT_ROOT / "test_objects" / "99992.stl"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
-SAMPLED_POINT_COUNT = 3000
+SAMPLED_POINT_COUNT = 1000
 DEFAULT_BASE_SEED = 1234#1234
 MAX_MODELS = 10
 MIN_SAMPLE_SIZE = 11
@@ -360,6 +360,7 @@ def create_and_estimate_supq(
     base_seed: int = DEFAULT_BASE_SEED,
     visualize: bool = True,
     save_debug_views: bool = False,
+    return_artifacts: bool = False,
 ):
     save_debug_views = bool(save_debug_views or DEBUG_V)
     # --- load point cloud from file ---
@@ -612,7 +613,7 @@ def create_and_estimate_supq(
             treshold=threshold
         )
 
-    return {
+    result = {
         "input_mesh": str(input_path),
         "algorithm": algorithm,
         "base_seed": int(run_seeds.base),
@@ -639,6 +640,18 @@ def create_and_estimate_supq(
         "gt_misclassification_error": None if gt_misclassification_error is None else float(gt_misclassification_error),
         "gt_inliers_assumed_from_tail": bool(loaded_input.gt_inliers_assumed_from_tail),
     }
+
+    if return_artifacts:
+        result.update(
+            {
+                "models": models,
+                "sampled_points": sampled_points,
+                "normals": normals,
+                "inliers_masks": inliers_masks,
+            }
+        )
+
+    return result
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
