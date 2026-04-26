@@ -225,6 +225,7 @@ finale/
 im_obj/
 out2/
 out/
+point_clouds/
 paper_graph_scripts/
 .gitignore
 .vscode
