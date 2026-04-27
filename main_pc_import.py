@@ -15,12 +15,17 @@ from point_cloud_utils import chamfer_distance
 from src.gair_ransac.gair_ransac import gair_ransac
 
 #THRESHOLD = 0.03
-M_NEIGHBORS = 6
+M_NEIGHBORS = 4
 THRESHOLD_FACTOR = 3
 THRESHOLD_SPACING_FACTOR = 0.5
-MIN_THRESHOLD = 0.035
-MIN_COVERAGE = 0.0
+MIN_THRESHOLD = 0.09
+MIN_COVERAGE = 0.2
 NOISE_STD = 0.015
+# Set to a value > 0 to append synthetic bbox outliers to mesh-sampled inputs.
+N_OUTLIERS = 600
+OUTLIER_MARGIN = 0.10
+OUTLIER_MODE = "uniform"
+OUTLIER_SEED_OFFSET = 10000
 DEBUG_V = False
 PROJECT_ROOT = Path(__file__).resolve().parent
 OBJECT_VIEWS_DIR = PROJECT_ROOT / "im_obj"
@@ -286,9 +291,11 @@ def sample_input_mesh(
     mesh: trimesh.Trimesh,
     n_points: int,
     seed: int | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     if n_points <= 0:
         raise ValueError(f"SAMPLED_POINT_COUNT must be positive, got {n_points}")
+    if N_OUTLIERS < 0:
+        raise ValueError(f"N_OUTLIERS must be non-negative, got {N_OUTLIERS}")
 
     sampled_points_list, normals_list = samp.sampling_sq(
         [mesh],
@@ -304,7 +311,30 @@ def sample_input_mesh(
     )
     sampled_points = np.vstack([np.asarray(sampled_points_list[0], dtype=np.float64),np.asarray(noisy_sampled[0], dtype=np.float64),])
     normals = np.vstack([np.asarray(normals_list[0], dtype=np.float64),np.asarray(noisy_normal[0], dtype=np.float64),])
-    return sampled_points, normals
+    gt_inlier_mask = None
+
+    if N_OUTLIERS > 0:
+        outlier_seed = None if seed is None else int(seed) + OUTLIER_SEED_OFFSET
+        outlier_points, outlier_normals = samp.sampling_outliers(
+            [mesh],
+            n_out=int(N_OUTLIERS),
+            margin=OUTLIER_MARGIN,
+            mode=OUTLIER_MODE,
+            seed=outlier_seed,
+        )
+        n_inliers = int(sampled_points.shape[0])
+        sampled_points = np.vstack(
+            [sampled_points, np.asarray(outlier_points, dtype=np.float64)]
+        )
+        normals = np.vstack([normals, np.asarray(outlier_normals, dtype=np.float64)])
+        gt_inlier_mask = np.concatenate(
+            [
+                np.ones(n_inliers, dtype=bool),
+                np.zeros(int(outlier_points.shape[0]), dtype=bool),
+            ]
+        )
+
+    return sampled_points, normals, gt_inlier_mask
 
 
 def load_input_points_and_normals(
@@ -345,10 +375,15 @@ def load_input_points_and_normals(
             gt_inliers_assumed_from_tail=gt_inliers_assumed_from_tail,
         )
 
-    points, normals = sample_input_mesh(
+    points, normals, gt_inlier_mask = sample_input_mesh(
         raw,
         n_points=SAMPLED_POINT_COUNT,
         seed=sample_seed,
+    )
+    gt_n_outliers = (
+        0
+        if gt_inlier_mask is None
+        else int(len(gt_inlier_mask) - int(gt_inlier_mask.sum()))
     )
     return LoadedInput(
         points=points,
@@ -356,6 +391,12 @@ def load_input_points_and_normals(
         kind="mesh",
         noise_std=float(NOISE_STD),
         noise_std_source="global NOISE_STD",
+        gt_inlier_mask=gt_inlier_mask,
+        gt_outlier_ratio=(
+            None if gt_inlier_mask is None else float(gt_n_outliers / len(gt_inlier_mask))
+        ),
+        gt_noise_std=None if gt_inlier_mask is None else float(NOISE_STD),
+        gt_inliers_assumed_from_tail=bool(gt_n_outliers > 0),
     )
 
 
@@ -399,10 +440,18 @@ def create_and_estimate_supq(
         f"evaluation_sampling={run_seeds.evaluation_sampling}"
     )
     if loaded_input.kind == "mesh":
+        synthetic_outliers = 0
+        if loaded_input.gt_inlier_mask is not None:
+            synthetic_outliers = int(
+                len(loaded_input.gt_inlier_mask) - int(loaded_input.gt_inlier_mask.sum())
+            )
         print(
             "Sampling | "
             f"target_sample_count={SAMPLED_POINT_COUNT} "
-            f"actual_point_count={sampled_points.shape[0]}"
+            f"actual_point_count={sampled_points.shape[0]} "
+            f"synthetic_outliers={synthetic_outliers} "
+            f"outlier_mode={OUTLIER_MODE} "
+            f"outlier_margin={OUTLIER_MARGIN:.2f}"
         )
     else:
         print(f"Sampling | point_cloud_count={sampled_points.shape[0]} (used directly)")
@@ -641,6 +690,9 @@ def create_and_estimate_supq(
         "runtime_s": float(runtime_s),
         "threshold": float(threshold),
         "input_noise_std": float(algorithm_noise_std),
+        "configured_n_outliers": int(N_OUTLIERS),
+        "outlier_sampling_mode": OUTLIER_MODE,
+        "outlier_sampling_margin": float(OUTLIER_MARGIN),
         "chamfer": None if cd is None else float(cd),
         "one_sided_chamfer": None if one_sided_cd is None else float(one_sided_cd),
         "saved_object_views_dir": str(OBJECT_VIEWS_DIR) if saved_object_view_paths else None,
