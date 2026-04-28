@@ -125,6 +125,30 @@ def load_split_results(results_dir, csv_glob, exclude_name_substring):
     return combined, csv_paths
 
 
+def prepare_misclassification_dataframe(df):
+    prepared = df.copy()
+    before_count = len(prepared)
+    prepared = prepared.dropna(
+        subset=[
+            "outlier_ratio",
+            "misclassification_error",
+            "execution_time_s",
+        ]
+    ).copy()
+    dropped_count = before_count - len(prepared)
+    if dropped_count > 0:
+        warn(
+            f"Dropped {dropped_count} row(s) without usable outlier ratio, "
+            "misclassification error, or execution time before plotting."
+        )
+    if prepared.empty:
+        raise ValueError(
+            "No rows with outlier_ratio, misclassification_error, and execution_time_s "
+            "are available for plotting."
+        )
+    return prepared
+
+
 def iter_point_cloud_groups(df):
     if "point_cloud_id" not in df.columns:
         return []
@@ -270,6 +294,7 @@ def main():
         ],
         results_dir,
     )
+    df = prepare_misclassification_dataframe(df)
 
     dataset_label = infer_dataset_label(results_dir)
     warn(f"Loaded {len(csv_paths)} split CSV files from {results_dir}.")

@@ -50,7 +50,7 @@ STYLE_MAP = {
 }
 
 
-STYLE_ORDER = ["RANSAC", "GAIR-RANSAC", "GC-RANSAC", "LO-RANSAC"]
+STYLE_ORDER = ["RANSAC", "GC-RANSAC", "LO-RANSAC", "GAIR-RANSAC"]
 FALLBACK_STYLE_CYCLE = [
     {"line": "#4C78A8", "fill": "#A0CBE8"},
     {"line": "#F58518", "fill": "#FFBF79"},
