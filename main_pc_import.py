@@ -16,13 +16,13 @@ from src.gair_ransac.gair_ransac import gair_ransac
 
 #THRESHOLD = 0.03
 M_NEIGHBORS = 4
-THRESHOLD_FACTOR = 3
+THRESHOLD_FACTOR = 2.0
 THRESHOLD_SPACING_FACTOR = 0.5
-MIN_THRESHOLD = 0.09
-MIN_COVERAGE = 0.2
-NOISE_STD = 0.015
+MIN_THRESHOLD = 0.10
+MIN_COVERAGE = 0.15
+NOISE_STD = 0.05
 # Set to a value > 0 to append synthetic bbox outliers to mesh-sampled inputs.
-N_OUTLIERS = 600
+N_OUTLIERS = 100
 OUTLIER_MARGIN = 0.10
 OUTLIER_MODE = "uniform"
 OUTLIER_SEED_OFFSET = 10000
@@ -34,7 +34,7 @@ PC_FILE = PROJECT_ROOT / "test_objects" / "131969.stl"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
 SAMPLED_POINT_COUNT = 4000
-DEFAULT_BASE_SEED = 12345#1234
+DEFAULT_BASE_SEED = 12345678#1234
 MAX_MODELS = 10
 MIN_SAMPLE_SIZE = 10
 MAX_SAMPLE_SIZE = 20
@@ -406,6 +406,7 @@ def create_and_estimate_supq(
     base_seed: int = DEFAULT_BASE_SEED,
     visualize: bool = True,
     save_debug_views: bool = False,
+    save_object_views: bool = True,
     return_artifacts: bool = False,
 ):
     save_debug_views = bool(save_debug_views or DEBUG_V)
@@ -641,27 +642,28 @@ def create_and_estimate_supq(
         print(f"reconstruction chamfer = {cd:.4f}")
         one_sided_cd = float(cKDTree(sample_from_supq_estimated).query(sampled_points, k=1)[0].mean())
         print(f"reconstruction one-sided chamfer = {one_sided_cd:.4f}")
-        output_stem = f"{input_path.stem}_{algorithm}_seed{run_seeds.base}"
-        saved_object_view_paths = vis.save_mesh_view_triplet(
-            list_mesh,
-            output_dir=OBJECT_VIEWS_DIR,
-            output_stem=output_stem,
-            pts=sampled_points,
-            point_size=5,
-            colors=colors,
-            inlier_mask=inlier_mask,
-            mss_used=(
-                total_best_mss_used
-                if algorithm in ("gair-ransac", "gc-ransac", "gair-mss-no-normals", "gc-mss-no-normals")
-                else None
-            ),
-            models=models,
-            treshold=threshold,
-        )
-        print(
-            f"Saved {len(saved_object_view_paths)} fitted-object views in "
-            f"{saved_object_view_paths[0].parent}"
-        )
+        if save_object_views:
+            output_stem = f"{input_path.stem}_{algorithm}_seed{run_seeds.base}"
+            saved_object_view_paths = vis.save_mesh_view_triplet(
+                list_mesh,
+                output_dir=OBJECT_VIEWS_DIR,
+                output_stem=output_stem,
+                pts=sampled_points,
+                point_size=5,
+                colors=colors,
+                inlier_mask=inlier_mask,
+                mss_used=(
+                    total_best_mss_used
+                    if algorithm in ("gair-ransac", "gc-ransac", "gair-mss-no-normals", "gc-mss-no-normals")
+                    else None
+                ),
+                models=models,
+                treshold=threshold,
+            )
+            print(
+                f"Saved {len(saved_object_view_paths)} fitted-object views in "
+                f"{saved_object_view_paths[0].parent}"
+            )
 
     if visualize:
         vis.show_mesh_and_points(
@@ -758,6 +760,7 @@ def main(argv: list[str] | None = None) -> int:
         base_seed=args.seed,
         visualize=not args.no_visualize,
         save_debug_views=args.save_debug_views,
+        save_object_views=True,
     )
     summary_parts = [
         "Summary |",

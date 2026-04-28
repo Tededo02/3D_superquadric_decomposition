@@ -23,32 +23,34 @@ plt.rcParams.update({
 
 
 METHOD_ALIASES = {
-    "ransac": "Ransac",
-    "vanilla": "Ransac",
-    "vanilla ransac": "Ransac",
-    "vanilla-ransac": "Ransac",
-    "lo ransac": "Ransac + LO",
-    "lo-ransac": "Ransac + LO",
-    "local opt": "Local Opt",
-    "local-opt": "Local Opt",
-    "local optimization": "Local Opt",
-    "gc ransac": "Ransac + GC",
-    "gc-ransac": "Ransac + GC",
-    "gair ransac": "Ransac + GAIR",
-    "gair-ransac": "Ransac + GAIR",
+    "ransac": "RANSAC",
+    "vanilla": "RANSAC",
+    "vanilla ransac": "RANSAC",
+    "vanilla-ransac": "RANSAC",
+    "lo ransac": "LO-RANSAC",
+    "lo-ransac": "LO-RANSAC",
+    "ransac + lo": "LO-RANSAC",
+    "local opt": "LO-RANSAC",
+    "local-opt": "LO-RANSAC",
+    "local optimization": "LO-RANSAC",
+    "gc ransac": "GC-RANSAC",
+    "gc-ransac": "GC-RANSAC",
+    "ransac + gc": "GC-RANSAC",
+    "gair ransac": "GAIR-RANSAC",
+    "gair-ransac": "GAIR-RANSAC",
+    "ransac + gair": "GAIR-RANSAC",
 }
 
 
 STYLE_MAP = {
-    "Ransac": {"line": "#5DAE61", "fill": "#0F8A20"},
-    "Ransac + LO": {"line": "#B45AC7", "fill": "#8A0FA8"},
-    "Local Opt": {"line": "#9C755F", "fill": "#D6B89C"},
-    "Ransac + GAIR": {"line": "#F0A202", "fill": "#F0A202"},
-    "Ransac + GC": {"line": "#377EB8", "fill": "#377EB8"},
+    "RANSAC": {"line": "#5DAE61", "fill": "#0F8A20"},
+    "LO-RANSAC": {"line": "#B45AC7", "fill": "#8A0FA8"},
+    "GAIR-RANSAC": {"line": "#F0A202", "fill": "#F0A202"},
+    "GC-RANSAC": {"line": "#377EB8", "fill": "#377EB8"},
 }
 
 
-STYLE_ORDER = ["Ransac", "Ransac + LO", "Local Opt", "Ransac + GC", "Ransac + GAIR"]
+STYLE_ORDER = ["RANSAC", "GAIR-RANSAC", "GC-RANSAC", "LO-RANSAC"]
 FALLBACK_STYLE_CYCLE = [
     {"line": "#4C78A8", "fill": "#A0CBE8"},
     {"line": "#F58518", "fill": "#FFBF79"},

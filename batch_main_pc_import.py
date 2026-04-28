@@ -3,6 +3,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import redirect_stderr, redirect_stdout
 import csv
 import io
+import os
 import sys
 from pathlib import Path
 
@@ -19,16 +20,32 @@ from src.visualizations import visualization as vis
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+TEST_OBJECTS_DIR = PROJECT_ROOT / "test_objects"
+TEST_OBJECT_FILE_ENV = "TEST_OBJECT_FILE"
+DEFAULT_TEST_OBJECT_FILE = "mush.glb"
 ALGORITHM = "gair-ransac"
-RANSACOV_MAX_MODELS = 3
-MAX_PARALLEL_PROCESSES = 4
+RANSACOV_MAX_MODELS = 2
+MAX_PARALLEL_PROCESSES = 6
 SHOW_RANSACOV_RESULT = True
 RANSACOV_PALETTE = ["lightgreen", "orange", "violet", "cyan", "yellow", "red", "lime", "pink", "gold", "turquoise"]
-DEFAULT_INPUT_MESHES = (
-    PROJECT_ROOT / "test_objects" / "99992.stl",
-   # PROJECT_ROOT / "test_objects" / "cartoon_character.glb",
-   # PROJECT_ROOT / "test_objects" / "anthropomorphic_mushroom_character.glb",
-)
+
+
+def resolve_default_input_meshes() -> tuple[Path, ...]:
+    test_object_file = os.environ.get(TEST_OBJECT_FILE_ENV, DEFAULT_TEST_OBJECT_FILE).strip()
+    if not test_object_file:
+        test_object_file = DEFAULT_TEST_OBJECT_FILE
+
+    relative_path = Path(test_object_file)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise ValueError(
+            f"{TEST_OBJECT_FILE_ENV} must be a file path relative to {TEST_OBJECTS_DIR}, "
+            f"got {test_object_file!r}"
+        )
+
+    return (TEST_OBJECTS_DIR / relative_path,)
+
+
+DEFAULT_INPUT_MESHES = resolve_default_input_meshes()
 DEFAULT_OUTPUT_CSV = Path("artifacts") / "main_pc_import_batch" / "consensus_std_results.csv"
 DEFAULT_RANSACOV_OUTPUT_CSV = Path("artifacts") / "main_pc_import_batch" / "ransacov_results.csv"
 RUN_FIELDNAMES = [
@@ -66,6 +83,13 @@ RUN_FIELDNAMES = [
 ]
 
 ARTIFACT_RESULT_KEYS = {"models", "sampled_points", "normals", "inliers_masks"}
+TRANSIENT_RANSACOV_KEYS = {
+    "_selected_models",
+    "_selected_indices",
+    "_selected_origins",
+    "_selected_inlier_counts",
+    "_selected_new_inlier_counts",
+}
 
 RANSACOV_FIELDNAMES = [
     "mesh_idx",
@@ -102,7 +126,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "input_meshes",
         nargs="*",
         default=[str(path) for path in DEFAULT_INPUT_MESHES],
-        help="Optional mesh list. Default: 99992.stl",
+        help=(
+            "Optional mesh list. If omitted, uses test_objects/${TEST_OBJECT_FILE}; "
+            f"default: {DEFAULT_TEST_OBJECT_FILE}."
+        ),
     )
     parser.add_argument("--start-seed", type=int, default=main_pc.DEFAULT_BASE_SEED)
     parser.add_argument("--seed-step", type=int, default=1)
@@ -245,35 +272,78 @@ def build_empty_run_row(
     }
 
 
+def build_reference_input(
+    mesh_path: Path,
+    seed: int,
+) -> tuple[np.ndarray, float, int]:
+    run_seeds = main_pc.build_run_seeds(seed)
+    input_path = main_pc.resolve_input_path(mesh_path)
+    loaded_input = main_pc.load_input_points_and_normals(
+        input_path,
+        sample_seed=run_seeds.input_sampling,
+    )
+    cloud_stats = main_pc.summarize_point_cloud(loaded_input.points)
+    threshold = main_pc.get_threshold(
+        float(loaded_input.noise_std),
+        median_nn_distance=cloud_stats.median_nn_distance,
+    )
+    return (
+        np.asarray(loaded_input.points, dtype=np.float64),
+        float(threshold),
+        int(run_seeds.evaluation_sampling),
+    )
+
+
+def strip_artifact_result(result: dict[str, object]) -> tuple[dict[str, object], list[object]]:
+    models = list(result.get("models") or [])
+    csv_result = {
+        key: value
+        for key, value in result.items()
+        if key not in ARTIFACT_RESULT_KEYS
+    }
+    return csv_result, models
+
+
+def strip_transient_ransacov_fields(row: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in row.items()
+        if key not in TRANSIENT_RANSACOV_KEYS
+    }
+
+
 def run_seed_worker(mesh_path: str, run_idx: int, seed: int) -> dict[str, object]:
-    stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
-    with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-        try:
-            # Parallel workers would otherwise all write the same GAIR debug filenames.
-            main_pc.DEBUG_V = False
-            result = main_pc.create_and_estimate_supq(
-                mesh_path,
-                algorithm=ALGORITHM,
-                base_seed=seed,
-                visualize=False,
-                save_debug_views=False,
-                return_artifacts=True,
-            )
-        except Exception as exc:
-            return {
-                "ok": False,
-                "run_idx": int(run_idx),
-                "seed": int(seed),
-                "error": str(exc),
-                "stderr": stderr_buffer.getvalue(),
-            }
+    with open(os.devnull, "w", encoding="utf-8") as stdout_sink:
+        with redirect_stdout(stdout_sink), redirect_stderr(stderr_buffer):
+            try:
+                # Parallel workers would otherwise all write the same GAIR debug filenames.
+                main_pc.DEBUG_V = False
+                result = main_pc.create_and_estimate_supq(
+                    mesh_path,
+                    algorithm=ALGORITHM,
+                    base_seed=seed,
+                    visualize=False,
+                    save_debug_views=False,
+                    save_object_views=False,
+                    return_artifacts=True,
+                )
+                csv_result, models = strip_artifact_result(result)
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "run_idx": int(run_idx),
+                    "seed": int(seed),
+                    "error": str(exc),
+                    "stderr": stderr_buffer.getvalue(),
+                }
 
     return {
         "ok": True,
         "run_idx": int(run_idx),
         "seed": int(seed),
-        "result": result,
+        "result": csv_result,
+        "models": models,
         "stderr": stderr_buffer.getvalue(),
     }
 
@@ -448,6 +518,14 @@ def run_batch(
         reference_seed: int | None = None
         reference_evaluation_seed: int | None = None
 
+        try:
+            reference_points, reference_threshold, reference_evaluation_seed = (
+                build_reference_input(mesh_path, seeds[0])
+            )
+            reference_seed = int(seeds[0])
+        except Exception as exc:
+            print(f"Could not build reference point cloud for RansaCov: {exc}")
+
         max_workers = min(max_parallel_processes, len(seeds))
         print(
             f"Running {len(seeds)} seed runs with up to "
@@ -465,7 +543,7 @@ def run_batch(
                     raise RuntimeError(str(job["error"]))
 
                 result = job["result"]
-                models = list(result.get("models") or [])
+                models = list(job.get("models") or [])
                 for model_idx, model in enumerate(models):
                     candidates.append(model)
                     candidate_origins.append(
@@ -476,17 +554,6 @@ def run_batch(
                         }
                     )
 
-                if reference_points is None:
-                    reference_points = np.asarray(result["sampled_points"], dtype=np.float64)
-                    reference_threshold = float(result["threshold"])
-                    reference_seed = int(seed)
-                    reference_evaluation_seed = int(result["evaluation_sampling_seed"])
-
-                csv_result = {
-                    key: value
-                    for key, value in result.items()
-                    if key not in ARTIFACT_RESULT_KEYS
-                }
                 row = {
                     "mesh_idx": int(mesh_idx),
                     "mesh_name": mesh_path.name,
@@ -494,7 +561,7 @@ def run_batch(
                     "seed": int(seed),
                     "status": "ok",
                     "error": "",
-                    **csv_result,
+                    **result,
                 }
                 chamfer_text = (
                     "n/a"
@@ -533,7 +600,6 @@ def run_batch(
             reference_seed=reference_seed,
             reference_evaluation_seed=reference_evaluation_seed,
         )
-        ransacov_rows.append(ransacov_row)
         print(
             f"\nRansaCov | status={ransacov_row['status']} "
             f"candidates={ransacov_row['n_candidates']} "
@@ -574,6 +640,7 @@ def run_batch(
                 reference_points,
                 float(reference_threshold),
             )
+        ransacov_rows.append(strip_transient_ransacov_fields(ransacov_row))
 
     with output_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=RUN_FIELDNAMES, extrasaction="ignore")
