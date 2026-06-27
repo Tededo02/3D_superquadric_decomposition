@@ -80,6 +80,15 @@ def _collect_frame_points(meshes: list, points: np.ndarray | None = None) -> np.
     return np.vstack(frame_chunks)
 
 
+def _camera_frame_points(meshes: list, points: np.ndarray | None = None) -> np.ndarray:
+    """Use the point cloud as camera frame whenever one is being displayed."""
+    if points is not None:
+        point_array = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+        if point_array.size > 0:
+            return point_array
+    return _collect_frame_points(meshes)
+
+
 def _camera_axes(camera_position: list[tuple[float, float, float]]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     camera_pos = np.asarray(camera_position[0], dtype=np.float64)
     focal_point = np.asarray(camera_position[1], dtype=np.float64)
@@ -197,27 +206,7 @@ def _focus_camera_on_points(plotter: pv.Plotter, points: np.ndarray) -> None:
         plotter.camera_position = DEFAULT_CAMERA_POSITION
         return
 
-    mins = points.min(axis=0)
-    maxs = points.max(axis=0)
-    center = (mins + maxs) / 2.0
-
-    default_position = np.asarray(DEFAULT_CAMERA_POSITION[0], dtype=np.float64)
-    default_focal_point = np.asarray(DEFAULT_CAMERA_POSITION[1], dtype=np.float64)
-    default_view_up = tuple(np.asarray(DEFAULT_CAMERA_POSITION[2], dtype=np.float64))
-
-    view_direction = default_position - default_focal_point
-    norm = np.linalg.norm(view_direction)
-    if norm == 0.0:
-        view_direction = np.array([1.0, 0.0, 0.0], dtype=np.float64)
-        norm = 1.0
-
-    plotter.camera_position = [
-        tuple(center + (view_direction / norm)),
-        tuple(center),
-        default_view_up,
-    ]
-    plotter.reset_camera()
-    plotter.camera.zoom(0.95)
+    plotter.camera_position = _build_camera_positions(points, n_views=1)[0]
     plotter.reset_camera_clipping_range()
 
 
@@ -464,9 +453,6 @@ def save_point_cloud_inlier_model_view(
     image_path.parent.mkdir(parents=True, exist_ok=True)
 
     fitted_mesh = supmesh.superquadric_mesh(model)
-    mesh_vertices = np.asarray(fitted_mesh.vertices, dtype=np.float64).reshape(-1, 3)
-    frame_points = points if mesh_vertices.size == 0 else np.vstack((points, mesh_vertices))
-
     display_point_size = max(point_size * 2, 12)
     pl = pv.Plotter(off_screen=True, window_size=(1600, 1200))
     pl.set_background("white")
@@ -491,7 +477,7 @@ def save_point_cloud_inlier_model_view(
         )
 
     pl.enable_eye_dome_lighting()
-    _focus_camera_on_points(pl, frame_points)
+    _focus_camera_on_points(pl, points)
     pl.screenshot(str(image_path))
     pl.close()
     return image_path
@@ -515,7 +501,7 @@ def save_mesh_view_triplet(
         image_dir = PROJECT_ROOT / image_dir
     image_dir.mkdir(parents=True, exist_ok=True)
 
-    frame_points = _collect_frame_points(meshes, pts)
+    frame_points = _camera_frame_points(meshes, pts)
     base_camera_position = _build_camera_positions(frame_points, n_views=1)[0]
     _, right_axis, up_axis = _camera_axes(base_camera_position)
     center = np.asarray(base_camera_position[1], dtype=np.float64)
@@ -568,7 +554,7 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
 
     # --- plotter ---
     pl = pv.Plotter()
-    frame_points = _populate_mesh_and_points_plotter(
+    _populate_mesh_and_points_plotter(
         pl,
         meshes,
         pts=pts,
@@ -580,7 +566,8 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
         treshold=treshold,
         include_points=True,
     )
-    initial_camera_position = _resolve_camera_position(camera_position, frame_points)
+    camera_frame_points = _camera_frame_points(meshes, pts)
+    initial_camera_position = _resolve_camera_position(camera_position, camera_frame_points)
     pl.camera_position = initial_camera_position
 
     returned_camera_position = pl.show(return_cpos=print_camera_on_close)

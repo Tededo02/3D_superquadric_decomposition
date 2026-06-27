@@ -12,6 +12,10 @@ TRANSLATION_MARGIN_FACTOR = 0.15
 MIN_TRANSLATION_MARGIN_FACTOR = 0.05
 MODEL_DIAGONAL_SUPPORT_FACTOR = 1.6
 MODEL_SUPPORT_SLACK_FACTOR = 4.0
+MIN_SHAPE_EXPONENT = 0.15
+ROBUST_LOSS_SCALE_FACTOR = 0.02
+# This is a small default weight for the axis ridge regularization term in the superquadric fitting objective.
+DEFAULT_AXIS_RIDGE_WEIGHT = 0.05
 
 
 @dataclass
@@ -63,16 +67,11 @@ def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
 
 
 def _reference_axis_upper_bounds(
-    reference_points: np.ndarray,
+    reference_axes: np.ndarray,
     reference_diagonal: float,
     min_axis_length: float,
     global_max_axis_length: float,
 ) -> np.ndarray:
-    reference_model = pca_initialization(reference_points)
-    reference_axes = np.array(
-        [reference_model.a1, reference_model.a2, reference_model.a3],
-        dtype=np.float64,
-    )
     axis_floor = max(min_axis_length, AXIS_UPPER_FLOOR_FACTOR * reference_diagonal)
     upper_bounds = np.maximum(AXIS_UPPER_FACTOR * reference_axes, axis_floor)
     return np.clip(upper_bounds, min_axis_length, global_max_axis_length)
@@ -109,14 +108,40 @@ def _normalize_index_input(index_input: np.ndarray, n_points: int, name: str) ->
     return np.asarray(index_input, dtype=np.int64)
 
 
+def _axis_ridge_residual_and_jacobian(
+    parameters: np.ndarray,
+    prior_axes: np.ndarray,
+    residual_scale: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    axes = np.asarray(parameters[:3], dtype=np.float64)
+    prior_axes = np.asarray(prior_axes, dtype=np.float64)
+    oversized = axes > prior_axes
+    residuals = np.where(
+        oversized,
+        float(residual_scale) * np.log(axes / prior_axes),
+        0.0,
+    )
+
+    jacobian = np.zeros((3, parameters.shape[0]), dtype=np.float64)
+    jacobian[np.arange(3), np.arange(3)] = np.where(
+        oversized,
+        float(residual_scale) / axes,
+        0.0,
+    )
+    return residuals, jacobian
+
+
 # Fit a superquadric with bounded non-linear least squares.
 def fit_superquadric_ls(
     points: np.ndarray,
     bounds_reference_points: np.ndarray | None = None,
+    axis_ridge_weight: float = DEFAULT_AXIS_RIDGE_WEIGHT,
 ) -> SuperQuadricParams:
     point_array = np.asarray(points, dtype=np.float64)
     if point_array.shape[0] < 11:
         raise ValueError("too few points for a stable superqadric fit")
+    if not np.isfinite(axis_ridge_weight) or axis_ridge_weight < 0.0:
+        raise ValueError(f"axis_ridge_weight must be finite and non-negative, got {axis_ridge_weight}")
 
     # Build a robust initial guess from PCA.
     initial_model = pca_initialization(point_array)
@@ -125,6 +150,11 @@ def fit_superquadric_ls(
     reference_points = point_array if bounds_reference_points is None else np.asarray(bounds_reference_points, dtype=np.float64)
     if reference_points.shape[0] == 0:
         raise ValueError("bounds_reference_points must contain at least one point")
+    reference_model = initial_model if bounds_reference_points is None else pca_initialization(reference_points)
+    reference_axes = np.array(
+        [reference_model.a1, reference_model.a2, reference_model.a3],
+        dtype=np.float64,
+    )
 
     reference_min = reference_points.min(axis=0)
     reference_max = reference_points.max(axis=0)
@@ -133,12 +163,12 @@ def fit_superquadric_ls(
     min_axis_length = max(1e-3, 5e-2 * reference_diagonal)
     global_max_axis_length = max(1e-2, 1.2 * reference_diagonal)
     max_axis_lengths = _reference_axis_upper_bounds(
-        reference_points,
+        reference_axes,
         reference_diagonal,
         min_axis_length,
         global_max_axis_length,
     )
-    exponent_min, exponent_max = 0.08, 4.0
+    exponent_min, exponent_max = MIN_SHAPE_EXPONENT, 4.0
     angle_min, angle_max = -np.pi, np.pi
     min_translation_margin = MIN_TRANSLATION_MARGIN_FACTOR * reference_diagonal
     translation_margin = np.maximum(
@@ -196,11 +226,15 @@ def fit_superquadric_ls(
         dtype=np.float64,
     )
     np.clip(initial_parameters, lower_bounds, upper_bounds, out=initial_parameters)
+    axis_prior = np.clip(reference_axes, lower_bounds[:3], upper_bounds[:3])
+    robust_loss_scale = max(1e-3, ROBUST_LOSS_SCALE_FACTOR * reference_diagonal)
+    # This makes lambda relative to the mean data loss and independent of object units.
+    axis_ridge_scale = np.sqrt(float(axis_ridge_weight) * point_array.shape[0]) * robust_loss_scale
 
-    radial_cache: dict[str, np.ndarray | None] = {"parameters": None, "residuals": None, "jacobian": None}
+    objective_cache: dict[str, np.ndarray | None] = {"parameters": None, "residuals": None, "jacobian": None}
 
-    def radial_residuals(parameters: np.ndarray) -> np.ndarray:
-        cached_parameters = radial_cache["parameters"]
+    def objective_residuals(parameters: np.ndarray) -> np.ndarray:
+        cached_parameters = objective_cache["parameters"]
         if cached_parameters is None or not np.array_equal(cached_parameters, parameters):
             current_model = SuperQuadricParams(
                 a1=parameters[0],
@@ -211,24 +245,32 @@ def fit_superquadric_ls(
                 rot=np.array(parameters[5:8], dtype=np.float64),
                 t=np.array(parameters[8:11], dtype=np.float64),
             )
-            residuals, jacobian = superquadric_radial_residual_and_jacobian(current_model, point_array)
-            radial_cache["parameters"] = np.array(parameters, dtype=np.float64, copy=True)
-            radial_cache["residuals"] = residuals
-            radial_cache["jacobian"] = jacobian
-        return radial_cache["residuals"]
+            point_residuals, point_jacobian = superquadric_radial_residual_and_jacobian(
+                current_model,
+                point_array,
+            )
+            ridge_residuals, ridge_jacobian = _axis_ridge_residual_and_jacobian(
+                parameters,
+                axis_prior,
+                axis_ridge_scale,
+            )
+            objective_cache["parameters"] = np.array(parameters, dtype=np.float64, copy=True)
+            objective_cache["residuals"] = np.concatenate((point_residuals, ridge_residuals))
+            objective_cache["jacobian"] = np.vstack((point_jacobian, ridge_jacobian))
+        return objective_cache["residuals"]
 
-    def radial_jacobian(parameters: np.ndarray) -> np.ndarray:
-        radial_residuals(parameters)
-        return radial_cache["jacobian"]
+    def objective_jacobian(parameters: np.ndarray) -> np.ndarray:
+        objective_residuals(parameters)
+        return objective_cache["jacobian"]
 
     optimization_result = least_squares(
-        fun=radial_residuals,
-        jac=radial_jacobian,
+        fun=objective_residuals,
+        jac=objective_jacobian,
         x0=initial_parameters,
         method="trf",
         bounds=(lower_bounds, upper_bounds),
         loss="soft_l1",
-        f_scale=1.0,
+        f_scale=robust_loss_scale,
         max_nfev=250,
     )
 

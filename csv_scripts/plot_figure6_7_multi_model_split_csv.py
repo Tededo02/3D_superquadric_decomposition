@@ -1,7 +1,6 @@
 import argparse
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
 
 from common_plot_utils import build_method_legend
@@ -10,16 +9,21 @@ from common_plot_utils import draw_scatter_with_pareto
 from common_plot_utils import load_results
 from common_plot_utils import pick_methods
 from common_plot_utils import save_figure
+import matplotlib.pyplot as plt
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_RESULTS_DIR = ROOT / "finale" / "FINALSFINALS"
 DEFAULT_OUTPUT_PATH = ROOT / "csv_scripts" / "out2" / "figure6_7_multi_model_split_csv.png"
+DEFAULT_OPTIMIZATION_METHODS = ["GC-RANSAC", "GAIR-RANSAC"]
 PLOT_OUTPUT_SUFFIXES = {
     "misclassification": "misclassification_vs_outliers",
+    "local_optimizations": "local_optimizations_vs_outliers",
     "time_vs_misclassification": "time_vs_misclassification",
 }
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
@@ -34,6 +38,14 @@ def parse_args():
         nargs="+",
         default=None,
         help="Methods to include in the time-vs-misclassification scatter plot.",
+    )
+    parser.add_argument(
+        "--optimization-methods",
+        "--local-optimization-methods",
+        dest="optimization_methods",
+        nargs="+",
+        default=DEFAULT_OPTIMIZATION_METHODS,
+        help="Methods to include in the local-optimizations violin plot.",
     )
     parser.add_argument("--central-tendency", choices=["mean", "median"], default="mean")
     parser.add_argument("--figure-number", type=int, default=6)
@@ -94,6 +106,11 @@ def normalize_split_results(df):
 
     if "execution_time_s" not in normalized.columns and "runtime_s" in normalized.columns:
         normalized["execution_time_s"] = normalized["runtime_s"]
+
+    if "local_optimization_steps" not in normalized.columns and "n_local_opts" in normalized.columns:
+        normalized["local_optimization_steps"] = normalized["n_local_opts"]
+    if "n_local_opts" not in normalized.columns and "local_optimization_steps" in normalized.columns:
+        normalized["n_local_opts"] = normalized["local_optimization_steps"]
 
     return normalized
 
@@ -247,10 +264,64 @@ def render_time_vs_misclassification_figure(df, args, dataset_label, output_path
     plt.close(fig)
 
 
+def prepare_local_optimization_dataframe(df):
+    if "local_optimization_steps" not in df.columns:
+        warn("No local_optimization_steps or n_local_opts column found; skipping local-optimizations plot.")
+        return None
+
+    prepared = df.dropna(subset=["outlier_ratio", "local_optimization_steps"]).copy()
+    dropped_count = len(df) - len(prepared)
+    if dropped_count > 0:
+        warn(
+            f"Dropped {dropped_count} row(s) without usable outlier ratio or local "
+            "optimization count before plotting local optimizations."
+        )
+    if prepared.empty:
+        warn("No rows with outlier_ratio and local_optimization_steps are available; skipping plot.")
+        return None
+
+    return prepared
+
+
+def render_local_optimization_figure(df, args, dataset_label, output_path):
+    local_df = prepare_local_optimization_dataframe(df)
+    if local_df is None:
+        return
+
+    optimization_methods = pick_methods(local_df, args.optimization_methods)
+    if not optimization_methods:
+        warn("No requested methods available for local-optimizations plot.")
+        return
+
+    fig, ax = plt.subplots(figsize=(8.6, 5.2))
+
+    draw_overlapping_violins(
+        ax=ax,
+        df=local_df,
+        metric_column="local_optimization_steps",
+        methods=optimization_methods,
+        title="Number of Local Optimizations",
+        y_label="Number of Local Optimizations",
+        central=args.central_tendency,
+    )
+    ax.set_ylim(bottom=0)
+    place_legend_above_axis(ax, build_method_legend(optimization_methods))
+
+    fig.subplots_adjust(bottom=0.13, top=0.78)
+
+    save_figure(fig, output_path, dpi=args.dpi)
+    plt.close(fig)
+
+
 def render_figures(df, args, dataset_label, output_path, total=False):
     misclassification_output_path = build_plot_output_path(
         output_path,
         "misclassification",
+        total=total,
+    )
+    local_optimization_output_path = build_plot_output_path(
+        output_path,
+        "local_optimizations",
         total=total,
     )
     time_vs_misclassification_output_path = build_plot_output_path(
@@ -264,6 +335,12 @@ def render_figures(df, args, dataset_label, output_path, total=False):
         args,
         dataset_label,
         misclassification_output_path,
+    )
+    render_local_optimization_figure(
+        df,
+        args,
+        dataset_label,
+        local_optimization_output_path,
     )
     render_time_vs_misclassification_figure(
         df,

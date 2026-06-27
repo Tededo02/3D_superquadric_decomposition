@@ -15,14 +15,17 @@ from point_cloud_utils import chamfer_distance
 from src.gair_ransac.gair_ransac import gair_ransac
 
 #THRESHOLD = 0.03
-M_NEIGHBORS = 4
-THRESHOLD_FACTOR = 2.0
-THRESHOLD_SPACING_FACTOR = 0.5
-MIN_THRESHOLD = 0.10
-MIN_COVERAGE = 0.15
-NOISE_STD = 0.05
+OUT_ITERATIONS = 10
+INNER_ITERATIONS = 80
+# GAIR graph degree and initial MSS neighborhood. Normal estimation has its own setting below.
+M_NEIGHBORS = 10
+THRESHOLD_FACTOR = 3.0
+THRESHOLD_SPACING_FACTOR = 2.0
+MIN_THRESHOLD = 0.009
+MIN_COVERAGE = 0.05
+NOISE_STD = 0.0
 # Set to a value > 0 to append synthetic bbox outliers to mesh-sampled inputs.
-N_OUTLIERS = 100
+N_OUTLIERS = 0
 OUTLIER_MARGIN = 0.10
 OUTLIER_MODE = "uniform"
 OUTLIER_SEED_OFFSET = 10000
@@ -30,16 +33,17 @@ DEBUG_V = False
 PROJECT_ROOT = Path(__file__).resolve().parent
 OBJECT_VIEWS_DIR = PROJECT_ROOT / "im_obj"
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "131969.stl"
+PC_FILE = PROJECT_ROOT / "test_objects" / "real_pc" / "etp_no_floor_2.ply"
+NORMAL_ESTIMATION_NEIGHBORS = 24
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
-SAMPLED_POINT_COUNT = 4000
-DEFAULT_BASE_SEED = 12345678#1234
-MAX_MODELS = 10
-MIN_SAMPLE_SIZE = 10
+SAMPLED_POINT_COUNT = 8000
+DEFAULT_BASE_SEED = 12345674535#1234
+MAX_MODELS = 6
+MIN_SAMPLE_SIZE = 11
 MAX_SAMPLE_SIZE = 20
-MIN_INLIERS_FLOOR = 5
-MAX_INLIERS_CAP = 12
+MIN_INLIERS_FLOOR = 100
+MAX_INLIERS_CAP = 300
 SUPPORTED_ALGORITHMS = (
     "ls",
     "inner-ransac",
@@ -49,11 +53,6 @@ SUPPORTED_ALGORITHMS = (
     "gair-mss-no-normals",
     "gc-mss-no-normals",
 )
-PYVISTA_CAMERA_POSITION = [
-    (9.38230319524604, 3.7942846282426563, 6.294340545028417),
-    (0.0, 0.0, 0.0),
-    (-0.18140538052646699, 0.9380912113821817, -0.2950880665895499),
-]
 
 
 @dataclass(frozen=True)
@@ -199,6 +198,12 @@ def tune_ransac_hyperparameters(stats: PointCloudStats) -> RansacTuning:
             min_inliers=0,
             mss_max_pool_fraction=0.25,
         )
+    if MIN_SAMPLE_SIZE < 11 or MAX_SAMPLE_SIZE < MIN_SAMPLE_SIZE:
+        raise ValueError(
+            "Invalid RANSAC sample-size configuration: superquadric fitting requires "
+            f"at least 11 points, got MIN_SAMPLE_SIZE={MIN_SAMPLE_SIZE} and "
+            f"MAX_SAMPLE_SIZE={MAX_SAMPLE_SIZE}"
+        )
 
     sample_low = min(MIN_SAMPLE_SIZE, point_count)
     sample_high = min(MAX_SAMPLE_SIZE, point_count)
@@ -261,6 +266,33 @@ def load_trimesh_asset(path: Path):
     return asset
 
 
+def estimate_point_cloud_normals(
+    points: np.ndarray,
+    n_neighbors: int = NORMAL_ESTIMATION_NEIGHBORS,
+) -> np.ndarray:
+    point_count = int(points.shape[0])
+    if point_count < 3:
+        raise ValueError(f"Need at least 3 points to estimate normals, got {point_count}")
+
+    k = min(max(int(n_neighbors), 3), point_count)
+    tree = cKDTree(points)
+    neighbor_indices = tree.query(points, k=k)[1]
+    normals = np.empty_like(points, dtype=np.float64)
+    cloud_center = np.mean(points, axis=0)
+
+    for index, indices in enumerate(neighbor_indices):
+        neighborhood = points[indices]
+        centered = neighborhood - np.mean(neighborhood, axis=0)
+        _, _, vh = np.linalg.svd(centered, full_matrices=False)
+        normal = vh[-1]
+        if np.dot(normal, points[index] - cloud_center) < 0.0:
+            normal = -normal
+        normals[index] = normal
+
+    normal_norm = np.linalg.norm(normals, axis=1, keepdims=True)
+    return normals / np.where(normal_norm > 0.0, normal_norm, 1.0)
+
+
 def load_point_cloud_with_normals(path: Path) -> tuple[np.ndarray, np.ndarray]:
     raw = load_trimesh_asset(path)
     points = np.asarray(raw.vertices, dtype=np.float64)
@@ -272,9 +304,7 @@ def load_point_cloud_with_normals(path: Path) -> tuple[np.ndarray, np.ndarray]:
     else:
         normals = np.asarray(getattr(raw, "vertex_normals", []), dtype=np.float64)
         if normals.shape != points.shape:
-            raise FileNotFoundError(
-                f"No normals file found for {path.name} and embedded normals are unavailable."
-            )
+            normals = estimate_point_cloud_normals(points)
 
     if points.shape != normals.shape:
         raise ValueError(
@@ -481,7 +511,6 @@ def create_and_estimate_supq(
         vis.show_point_cloud(
             sampled_points,
             point_size=5,
-            camera_position=PYVISTA_CAMERA_POSITION,
             print_camera_on_close=True,
         )
     """
@@ -568,8 +597,8 @@ def create_and_estimate_supq(
             normals,
             threshold=threshold,
             max_models=max_models,
-            max_iterations=3,
-            inner_iterations=100,
+            max_iterations=OUT_ITERATIONS,
+            inner_iterations=INNER_ITERATIONS,
             radius=graph_radius,
             use_normal_coherence=use_normal_coherence,
             min_coverage=MIN_COVERAGE,
@@ -579,7 +608,7 @@ def create_and_estimate_supq(
             min_inliers=ransac_tuning.min_inliers,
             mss_max_pool_fraction=ransac_tuning.mss_max_pool_fraction,
             save_debug_views=save_debug_views,
-            m_neighbors=M_NEIGHBORS
+            m_neighbors=M_NEIGHBORS,
         )
         if not models:
             print("gair_ransac did not return any model")
@@ -677,7 +706,6 @@ def create_and_estimate_supq(
             models=models,
             treshold=threshold,
             print_camera_on_close=True,
-            camera_position=PYVISTA_CAMERA_POSITION,
         )
 
     result = {

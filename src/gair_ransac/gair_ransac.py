@@ -3,6 +3,7 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.spatial import cKDTree
 
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from src.visualizations.visualization import (
@@ -61,6 +62,21 @@ def _sample_superquadric_surface(model: "SuperQuadricParams", n: int = 1000) -> 
     pts = np.stack([x, y, z], axis=1)
     rotation = model.rotation_matrix()
     return (pts @ rotation.T) + model.t
+
+
+def _model_surface_coverage(
+    model: SuperQuadricParams,
+    support_points: np.ndarray,
+    threshold: float,
+    n_samples: int = 1000,
+) -> float:
+    support_points = np.asarray(support_points, dtype=np.float64)
+    if support_points.shape[0] == 0:
+        return 0.0
+
+    surface_samples = _sample_superquadric_surface(model, n=n_samples)
+    nearest_distances = cKDTree(support_points).query(surface_samples, k=1)[0]
+    return float(np.mean(nearest_distances < float(threshold)))
 
 
 def gair_ransac(
@@ -161,7 +177,6 @@ def gair_ransac(
             )
             candidate_count = int(np.count_nonzero(candidate_inliers))
             best_count = int(np.count_nonzero(best_inliers))
-
             if candidate_count < best_count + 1:
                 continue
 
@@ -246,6 +261,12 @@ def gair_ransac(
                     current_points = current_point_cloud[current_inliers]
                     if not model_matches_support_scale(current_model, current_points, threshold):
                         continue
+                    if min_coverage > 0.0 and _model_surface_coverage(
+                        current_model,
+                        current_points,
+                        threshold,
+                    ) < min_coverage:
+                        continue
                 best_model = current_model
                 best_inliers = current_inliers
                 best_mss_used = sample_points.copy()
@@ -295,13 +316,12 @@ def gair_ransac(
                 pass
 
         if min_coverage > 0.0:
-            from scipy.spatial import cKDTree as _cKDTree
-
-            surface_samples = _sample_superquadric_surface(best_model, n=1000)
             inlier_points = current_point_cloud[best_inliers]
-            tree_inliers = _cKDTree(inlier_points)
-            dists, _ = tree_inliers.query(surface_samples, k=1)
-            coverage = float((dists < threshold).mean())
+            coverage = _model_surface_coverage(
+                best_model,
+                inlier_points,
+                threshold,
+            )
             if coverage < min_coverage:
                 continue
 
@@ -321,7 +341,7 @@ def gair_ransac(
             best_model,
             current_point_cloud,
             threshold,
-            factor=3.0,
+            factor=2.5,
             normals=current_normals,
         )
         remaining_indices = remaining_indices[~remove_mask]
