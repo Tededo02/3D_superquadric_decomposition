@@ -35,7 +35,7 @@ INNER_ITER   = 100
 N_TRIALS     = 50
 K            = 3
 EVAL_SEED    = 42     # fixed so Chamfer is comparable across trials
-OUT_DIR      = ROOT / "experiments" / "artifacts" / "final_experiment"
+OUT_DIR      = ROOT / "data" / "results"
 N_OUTLIERS   = 130    # constant uniform outliers injected per trial (0 = none)
 NOISE        = 0.0    # Gaussian noise std on positions and normals (0.0 = none)
 MAX_LOAD_PTS = 8000   # random subsample cap after background removal (None = no cap)
