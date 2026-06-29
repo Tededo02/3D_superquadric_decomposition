@@ -33,8 +33,8 @@ from scipy.spatial import cKDTree
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-INPUT_POINT_CLOUD = PROJECT_ROOT / "test_objects" / "real_pc" / "etp_no_floor.ply"
-OUTPUT_POINT_CLOUD = PROJECT_ROOT / "test_objects" / "real_pc" / "etp_no_floor_2.ply"
+INPUT_POINT_CLOUD = PROJECT_ROOT / "test_objects" / "real_pc" / "peluche2.ply"
+OUTPUT_POINT_CLOUD = PROJECT_ROOT / "test_objects" / "real_pc" / "peluche2_nf.ply"
 
 RANSAC_ITERATIONS = 400
 RANSAC_SAMPLE_SIZE = 50000

@@ -24,6 +24,7 @@ FloatArray = NDArray[np.float64]
 BoolArray = NDArray[np.bool_]
 IntArray = NDArray[np.int64]
 IMAGES_DIR = Path(__file__).resolve().parents[2] / "images"
+CENTER_BEHIND_NORMALS_MIN_FRACTION = 0.60
 
 
 def compare_consensus(prev_mask: np.ndarray, new_mask: np.ndarray, min_gain: int = 1) -> bool:
@@ -79,6 +80,32 @@ def _model_surface_coverage(
     return float(np.mean(nearest_distances < float(threshold)))
 
 
+def _model_center_is_behind_inlier_normals(
+    model: SuperQuadricParams,
+    support_points: np.ndarray,
+    support_normals: np.ndarray,
+    min_fraction: float = CENTER_BEHIND_NORMALS_MIN_FRACTION,
+) -> bool:
+    support_points = np.asarray(support_points, dtype=np.float64)
+    support_normals = np.asarray(support_normals, dtype=np.float64)
+    if support_points.shape[0] == 0 or support_normals.shape != support_points.shape:
+        return False
+
+    normal_norm = np.linalg.norm(support_normals, axis=1, keepdims=True)
+    valid = np.squeeze(normal_norm, axis=1) > 1e-12
+    if not np.any(valid):
+        return False
+
+    normals_unit = support_normals[valid] / normal_norm[valid]
+    center_vectors = np.asarray(model.t, dtype=np.float64).reshape(1, 3) - support_points[valid]
+    signed_center_side = np.einsum("ij,ij->i", center_vectors, normals_unit, optimize=True)
+    signed_center_side = signed_center_side[np.isfinite(signed_center_side)]
+    if signed_center_side.size == 0:
+        return False
+
+    return bool(float(np.mean(signed_center_side < 0.0)) >= float(min_fraction))
+
+
 def gair_ransac(
     point_cloud: np.ndarray,
     normals: np.ndarray,
@@ -108,8 +135,12 @@ def gair_ransac(
     remaining_indices: IntArray = np.arange(n_points, dtype=np.int64)
     models_set: list[SuperQuadricParams] = []
     inliers_set: list[BoolArray] = []
+    model_search_attempts = 0
+    max_model_search_attempts = max(1, 5 * int(max_models))
 
-    for model_idx in range(max_models):
+    while len(models_set) < max_models and model_search_attempts < max_model_search_attempts:
+        model_idx = len(models_set)
+        model_search_attempts += 1
         if remaining_indices.size < max(sample_size, min_inliers):
             break
 
@@ -259,7 +290,14 @@ def gair_ransac(
             if current_count > int(np.count_nonzero(best_inliers)):
                 if current_count >= min_inliers:
                     current_points = current_point_cloud[current_inliers]
+                    current_inlier_normals = current_normals[current_inliers]
                     if not model_matches_support_scale(current_model, current_points, threshold):
+                        continue
+                    if not _model_center_is_behind_inlier_normals(
+                        current_model,
+                        current_points,
+                        current_inlier_normals,
+                    ):
                         continue
                     if min_coverage > 0.0 and _model_surface_coverage(
                         current_model,
@@ -304,10 +342,15 @@ def gair_ransac(
                         ),
                     )
                 refit_count = int(np.count_nonzero(refit_inliers))
+                refit_points = current_point_cloud[refit_inliers]
                 if refit_count >= best_count and model_matches_support_scale(
                     refit_model,
-                    current_point_cloud[refit_inliers],
+                    refit_points,
                     threshold,
+                ) and _model_center_is_behind_inlier_normals(
+                    refit_model,
+                    refit_points,
+                    current_normals[refit_inliers],
                 ):
                     best_model = refit_model
                     best_inliers = refit_inliers
@@ -324,7 +367,12 @@ def gair_ransac(
             )
             if coverage < min_coverage:
                 continue
-
+        if not _model_center_is_behind_inlier_normals(
+            best_model,
+            current_point_cloud[best_inliers],
+            current_normals[best_inliers],
+        ):
+            continue
         global_inliers: BoolArray = np.zeros(n_points, dtype=bool)
         global_inliers[remaining_indices[best_inliers]] = True
 
@@ -341,7 +389,7 @@ def gair_ransac(
             best_model,
             current_point_cloud,
             threshold,
-            factor=2.5,
+            factor=3.0,
             normals=current_normals,
         )
         remaining_indices = remaining_indices[~remove_mask]

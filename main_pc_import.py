@@ -9,6 +9,7 @@ from scipy.spatial import cKDTree
 from src.superquadrics import superquadric_mesh as supmesh
 from src.visualizations import visualization as vis
 from src.superquadrics import superquadric_sampling as samp
+from src.point_cloud_normals import estimate_normals_consistent
 from src.gair_ransac.inner_ransac import inner_ransac, fit_superquadric_ls
 from src.gair_ransac.ransac import ransac
 from point_cloud_utils import chamfer_distance
@@ -16,13 +17,13 @@ from src.gair_ransac.gair_ransac import gair_ransac
 
 #THRESHOLD = 0.03
 OUT_ITERATIONS = 10
-INNER_ITERATIONS = 80
+INNER_ITERATIONS = 100
 # GAIR graph degree and initial MSS neighborhood. Normal estimation has its own setting below.
-M_NEIGHBORS = 10
+M_NEIGHBORS = 6
 THRESHOLD_FACTOR = 3.0
 THRESHOLD_SPACING_FACTOR = 2.0
-MIN_THRESHOLD = 0.009
-MIN_COVERAGE = 0.05
+FIX_THRESHOLD = 0.0025
+MIN_COVERAGE = 0.0
 NOISE_STD = 0.0
 # Set to a value > 0 to append synthetic bbox outliers to mesh-sampled inputs.
 N_OUTLIERS = 0
@@ -33,17 +34,17 @@ DEBUG_V = False
 PROJECT_ROOT = Path(__file__).resolve().parent
 OBJECT_VIEWS_DIR = PROJECT_ROOT / "im_obj"
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "real_pc" / "etp_no_floor_2.ply"
-NORMAL_ESTIMATION_NEIGHBORS = 24
+PC_FILE = PROJECT_ROOT / "test_objects" / "real_pc" / "etp_no_floor.ply"
+NORMAL_ESTIMATION_NEIGHBORS = 20
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
 SAMPLED_POINT_COUNT = 8000
-DEFAULT_BASE_SEED = 12345674535#1234
-MAX_MODELS = 6
+DEFAULT_BASE_SEED = 123456745#1234
+MAX_MODELS = 12
 MIN_SAMPLE_SIZE = 11
 MAX_SAMPLE_SIZE = 20
 MIN_INLIERS_FLOOR = 100
-MAX_INLIERS_CAP = 300
+MIN_INLIERS_FRACTION = 0.00
 SUPPORTED_ALGORITHMS = (
     "ls",
     "inner-ransac",
@@ -211,9 +212,8 @@ def tune_ransac_hyperparameters(stats: PointCloudStats) -> RansacTuning:
     sample_size = int(np.clip(raw_sample_size, sample_low, sample_high))
 
     min_inliers_low = min(max(sample_size, MIN_INLIERS_FLOOR), point_count)
-    min_inliers_high = min(MAX_INLIERS_CAP, point_count)
-    raw_min_inliers = int(round(0.15 * point_count))
-    min_inliers = int(np.clip(raw_min_inliers, min_inliers_low, min_inliers_high))
+    raw_min_inliers = int(round(MIN_INLIERS_FRACTION * point_count))
+    min_inliers = int(np.clip(raw_min_inliers, min_inliers_low, point_count))
 
     mss_max_pool_fraction = float(
         np.clip((6.0 * sample_size) / max(point_count, 1), 0.18, 0.35)
@@ -229,11 +229,16 @@ def get_threshold(
     noise_std: float,
     median_nn_distance: float | None = None,
 ) -> float:
+    if FIX_THRESHOLD < 0.0:
+        raise ValueError(f"FIX_THRESHOLD must be non-negative, got {FIX_THRESHOLD}")
+    if FIX_THRESHOLD > 0.0:
+        return float(FIX_THRESHOLD)
+
     threshold_from_noise = float(THRESHOLD_FACTOR) * float(noise_std)
     threshold_from_spacing = 0.0
     if median_nn_distance is not None and median_nn_distance > 0.0:
         threshold_from_spacing = float(THRESHOLD_SPACING_FACTOR) * float(median_nn_distance)
-    return max(float(MIN_THRESHOLD), threshold_from_noise, threshold_from_spacing)
+    return max(threshold_from_noise, threshold_from_spacing)
 
 
 def resolve_input_path(pc_file: str | Path) -> Path:
@@ -270,27 +275,8 @@ def estimate_point_cloud_normals(
     points: np.ndarray,
     n_neighbors: int = NORMAL_ESTIMATION_NEIGHBORS,
 ) -> np.ndarray:
-    point_count = int(points.shape[0])
-    if point_count < 3:
-        raise ValueError(f"Need at least 3 points to estimate normals, got {point_count}")
-
-    k = min(max(int(n_neighbors), 3), point_count)
-    tree = cKDTree(points)
-    neighbor_indices = tree.query(points, k=k)[1]
-    normals = np.empty_like(points, dtype=np.float64)
-    cloud_center = np.mean(points, axis=0)
-
-    for index, indices in enumerate(neighbor_indices):
-        neighborhood = points[indices]
-        centered = neighborhood - np.mean(neighborhood, axis=0)
-        _, _, vh = np.linalg.svd(centered, full_matrices=False)
-        normal = vh[-1]
-        if np.dot(normal, points[index] - cloud_center) < 0.0:
-            normal = -normal
-        normals[index] = normal
-
-    normal_norm = np.linalg.norm(normals, axis=1, keepdims=True)
-    return normals / np.where(normal_norm > 0.0, normal_norm, 1.0)
+    result = estimate_normals_consistent(points, n_neighbors=n_neighbors)
+    return result.normals
 
 
 def load_point_cloud_with_normals(path: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -494,6 +480,8 @@ def create_and_estimate_supq(
     print(
         "Threshold | "
         f"threshold={threshold:.4f} "
+        f"mode={'fixed' if FIX_THRESHOLD > 0.0 else 'auto'} "
+        f"fix_threshold={FIX_THRESHOLD:.4f} "
         f"noise_std={algorithm_noise_std:.4f} "
         f"threshold_factor={THRESHOLD_FACTOR:.4f} "
         f"spacing_factor={THRESHOLD_SPACING_FACTOR:.4f} "
@@ -719,6 +707,8 @@ def create_and_estimate_supq(
         "n_models": int(len(models)),
         "runtime_s": float(runtime_s),
         "threshold": float(threshold),
+        "fix_threshold": float(FIX_THRESHOLD),
+        "threshold_mode": "fixed" if FIX_THRESHOLD > 0.0 else "auto",
         "input_noise_std": float(algorithm_noise_std),
         "configured_n_outliers": int(N_OUTLIERS),
         "outlier_sampling_mode": OUTLIER_MODE,
