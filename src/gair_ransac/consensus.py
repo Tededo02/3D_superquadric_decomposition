@@ -17,8 +17,6 @@ def distance_err(
     )
     return np.abs(d)
 
-# computes the cosine of the angle between the normal of the superquadric at each point and the normal of the point cloud,
-#  as a measure of alignment (1 is perfectly aligned, -1 is opposite, 0 is orthogonal)
 def normal_alignment_score(
     model: SuperQuadricParams,
     points: np.ndarray,

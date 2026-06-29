@@ -13,48 +13,36 @@ class InnerRansacResult:
     best_inlier_count: int
     best_inliers_mask: np.ndarray
 
-
 def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
-    point_array = np.asarray(points, dtype=np.float64)
-
-    # Estimate translation and principal directions from the point sample.
-    center = point_array.mean(axis=0)
-    centered_points = point_array - center
-    covariance = centered_points.T @ centered_points / max(point_array.shape[0] - 1, 1)
-    _, principal_axes = np.linalg.eigh(covariance)
-    rotation_matrix = principal_axes[:, ::-1]
-    if np.linalg.det(rotation_matrix) < 0:
-        rotation_matrix[:, 2] *= -1.0
-
-    # Estimate the semi-axes from robust quantiles in the PCA frame.
-    pca_coordinates = centered_points @ rotation_matrix
-    lower_quantile = np.percentile(pca_coordinates, 5.0, axis=0)
-    upper_quantile = np.percentile(pca_coordinates, 95.0, axis=0)
-    semi_axes = np.maximum(0.525 * (upper_quantile - lower_quantile), 1e-3)
-
-    # Convert the PCA rotation matrix into the yaw-pitch-roll convention used here.
-    sin_pitch = np.clip(-rotation_matrix[2, 0], -1.0, 1.0)
-    pitch = np.arcsin(sin_pitch)
-    cos_pitch = np.cos(pitch)
-    if abs(cos_pitch) < 1e-8:
-        yaw = 0.0
-        roll = np.arctan2(-rotation_matrix[0, 1], rotation_matrix[1, 1])
+    mean = np.mean(points, axis=0)
+    cov  = np.cov(points - mean, rowvar=False)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    idx     = np.argsort(eigvals)[::-1]
+    eigvecs = eigvecs[:, idx]
+    R = eigvecs
+    if np.linalg.det(R) < 0:
+        R[:, 2] *= -1.0
+    Xc          = (points - mean) @ R
+    q_low       = np.percentile(Xc, 5.0,  axis=0)
+    q_high      = np.percentile(Xc, 95.0, axis=0)
+    half_ranges = 0.5 * (q_high - q_low)
+    margin      = 1.05
+    a1 = max(margin * half_ranges[0], 1e-3)
+    a2 = max(margin * half_ranges[1], 1e-3)
+    a3 = max(margin * half_ranges[2], 1e-3)
+    sy = -R[2, 0]
+    sy    = np.clip(sy, -1.0, 1.0)
+    pitch = np.arcsin(sy)
+    cp    = np.cos(pitch)
+    if abs(cp) < 1e-8:
+        yaw  = 0.0
+        roll = np.arctan2(-R[0, 1], R[1, 1])
     else:
-        roll = np.arctan2(rotation_matrix[2, 1], rotation_matrix[2, 2])
-        yaw = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
+        roll = np.arctan2(R[2, 1], R[2, 2])
+        yaw  = np.arctan2(R[1, 0], R[0, 0])
+    rot = (yaw, pitch, roll)  # (yaw=z, pitch=y, roll=x)
+    return SuperQuadricParams(a1=a1, a2=a2, a3=a3, e1=1.0, e2=1.0, rot=np.array(rot), t=np.array(mean))
 
-    return SuperQuadricParams(
-        a1=float(semi_axes[0]),
-        a2=float(semi_axes[1]),
-        a3=float(semi_axes[2]),
-        e1=1.0,
-        e2=1.0,
-        rot=np.array([yaw, pitch, roll], dtype=np.float64),
-        t=center.astype(np.float64, copy=False),
-    )
-
-
-# Fit a superquadric with bounded non-linear least squares.
 def fit_superquadric_ls(
     points: np.ndarray,
     error_metric: str = "radial",
@@ -219,26 +207,22 @@ def inner_ransac(
     n_iters: int = 50,
     random_seed: int | None = None,
 ) -> InnerRansacResult:
-    point_array = np.asarray(point_cloud, dtype=np.float64)
-    candidate_indices = np.asarray(refined_set_index, dtype=np.int64)
-    evaluation_indices = None if actual_set_index is None else np.asarray(actual_set_index, dtype=np.int64)
-    evaluation_points = point_array if evaluation_indices is None else point_array[evaluation_indices]
-    evaluation_normals = None if normals is None else np.asarray(normals, dtype=np.float64)
-
-    # Use the current GAIR set as the reference support for bounded fitting.
-    fit_reference_points = point_array[candidate_indices]
-    sampled_point_count = min(candidate_indices.size, 30)
-    effective_consensus_metric = error_metric if consensus_metric is None else consensus_metric
-
+    point_cloud           = np.asarray(point_cloud, dtype=np.float64)
+    refined_set_index     = np.asarray(refined_set_index, dtype=np.int64)
+    actual_points         = point_cloud if actual_set_index is None else point_cloud[np.asarray(actual_set_index, dtype=np.int64)]
+    actual_normals        = None if normals is None else np.asarray(normals, dtype=np.float64)
+    bounds_reference_points = point_cloud[refined_set_index]
+    sample_size: int      = 30
+    rng                   = np.random.default_rng(random_seed)
     best_model: Optional[SuperQuadricParams] = None
-    best_inlier_mask = np.empty((0,), dtype=bool)
-    best_inlier_count = -1
-    rng = np.random.default_rng(random_seed)
-
-    # Repeatedly sample from the refined set and keep the model with the largest consensus.
+    best_inliers: np.ndarray = np.empty((0,), dtype=bool)
+    best_count: int       = -1
+    if consensus_metric is None:
+        consensus_metric = error_metric
+    size_sample = min(np.size(refined_set_index), sample_size)
     for _ in range(n_iters):
-        sampled_indices = rng.choice(candidate_indices, size=sampled_point_count, replace=False, shuffle=False)
-        sampled_points = point_array[sampled_indices]
+        sample_idx = rng.choice(refined_set_index, size=size_sample, replace=False)
+        points     = point_cloud[sample_idx]
         try:
             candidate_model = fit_superquadric_ls(
                 sampled_points,
@@ -261,17 +245,14 @@ def inner_ransac(
             best_inlier_count = candidate_inlier_count
             best_inlier_mask = candidate_inlier_mask.astype(bool, copy=False)
 
-    # Return an empty result if no valid fit was found.
-    if best_inlier_count < 0 or best_model is None:
+    if best_count < 0 or best_model is None:
         return InnerRansacResult(
             best_model=SuperQuadricParams(1, 1, 1, 1, 1, [0, 0, 0], [0, 0, 0]),
             best_inlier_count=0,
             best_inliers_mask=np.empty((0,), dtype=bool),
         )
-
-    # Refit once on the full best consensus set for better final accuracy.
-    best_inlier_points = evaluation_points[best_inlier_mask]
-    if best_inlier_points.shape[0] >= 11:
+    inlier_points = actual_points[best_inliers]
+    if inlier_points.shape[0] >= 11:
         try:
             refined_model = fit_superquadric_ls(
                 best_inlier_points,
@@ -292,9 +273,5 @@ def inner_ransac(
                 best_inlier_mask = refined_inlier_mask.astype(bool, copy=False)
         except Exception:
             pass
+    return InnerRansacResult(best_model=best_model, best_inlier_count=best_count, best_inliers_mask=best_inliers)
 
-    return InnerRansacResult(
-        best_model=best_model,
-        best_inlier_count=best_inlier_count,
-        best_inliers_mask=best_inlier_mask,
-    )
