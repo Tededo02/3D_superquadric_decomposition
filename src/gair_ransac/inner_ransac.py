@@ -13,50 +13,36 @@ class InnerRansacResult:
     best_inlier_count: int
     best_inliers_mask: np.ndarray
 
-# initialize a superquadric model from a sample of points using PCA and quantiles
 def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
-    # compute the mean and covariance of the points
     mean = np.mean(points, axis=0)
-    cov = np.cov(points - mean, rowvar=False)
-    # compute the eigenvalues and eigenvectors of the covariance matrix
+    cov  = np.cov(points - mean, rowvar=False)
     eigvals, eigvecs = np.linalg.eigh(cov)
-    # sort the eigenvalues and eigenvectors in descending order
-    idx = np.argsort(eigvals)[::-1]
-    eigvals = eigvals[idx]
+    idx     = np.argsort(eigvals)[::-1]
     eigvecs = eigvecs[:, idx]
-    # use the eigenvectors to estimate the rotation of the superquadric
     R = eigvecs
     if np.linalg.det(R) < 0:
         R[:, 2] *= -1.0
-    # use quantiles (robust extents) in PCA frame to estimate the size of the superquadric
-    Xc = (points - mean) @ R
-    q_low = np.percentile(Xc, 5.0, axis=0)
-    q_high = np.percentile(Xc, 95.0, axis=0)
+    Xc          = (points - mean) @ R
+    q_low       = np.percentile(Xc, 5.0,  axis=0)
+    q_high      = np.percentile(Xc, 95.0, axis=0)
     half_ranges = 0.5 * (q_high - q_low)
-    margin = 1.05
+    margin      = 1.05
     a1 = max(margin * half_ranges[0], 1e-3)
     a2 = max(margin * half_ranges[1], 1e-3)
     a3 = max(margin * half_ranges[2], 1e-3)
-    # use the eigenvectors to estimate the rotation of the superquadric
     sy = -R[2, 0]
-    sy = np.clip(sy, -1.0, 1.0)
+    sy    = np.clip(sy, -1.0, 1.0)
     pitch = np.arcsin(sy)
-    cp = np.cos(pitch)
-
+    cp    = np.cos(pitch)
     if abs(cp) < 1e-8:
-        yaw = 0.0
+        yaw  = 0.0
         roll = np.arctan2(-R[0, 1], R[1, 1])
     else:
         roll = np.arctan2(R[2, 1], R[2, 2])
-        yaw = np.arctan2(R[1, 0], R[0, 0])
-
+        yaw  = np.arctan2(R[1, 0], R[0, 0])
     rot = (yaw, pitch, roll)  # (yaw=z, pitch=y, roll=x)
-    # use the mean to estimate the translation of the superquadric
-    t = mean
-    return SuperQuadricParams(a1=a1, a2=a2, a3=a3, e1=1.0, e2=1.0, rot=np.array(rot), t=np.array(t))
+    return SuperQuadricParams(a1=a1, a2=a2, a3=a3, e1=1.0, e2=1.0, rot=np.array(rot), t=np.array(mean))
 
-# Fit a superquadric to points using non-linear least squares with loss soft_l1.
-# Initialization is based on PCA and robust bounding-box estimates.
 def fit_superquadric_ls(
     points: np.ndarray,
     error_metric: str = "mix",
@@ -132,27 +118,22 @@ def inner_ransac(
     n_iters: int = 50,
     random_seed: int | None = None,
 ) -> InnerRansacResult:
-    point_cloud = np.asarray(point_cloud, dtype=np.float64)
-    refined_set_index = np.asarray(refined_set_index, dtype=np.int64)
-    actual_points = point_cloud if actual_set_index is None else point_cloud[np.asarray(actual_set_index, dtype=np.int64)]
-    actual_normals = None if normals is None else np.asarray(normals, dtype=np.float64)
+    point_cloud           = np.asarray(point_cloud, dtype=np.float64)
+    refined_set_index     = np.asarray(refined_set_index, dtype=np.int64)
+    actual_points         = point_cloud if actual_set_index is None else point_cloud[np.asarray(actual_set_index, dtype=np.int64)]
+    actual_normals        = None if normals is None else np.asarray(normals, dtype=np.float64)
     bounds_reference_points = point_cloud[refined_set_index]
-    points: np.ndarray
-    sample_size: int = 30 # minimum number of points to fit a superquadric (11 parameters)
-    result: InnerRansacResult
-    rng = np.random.default_rng(random_seed)
-    model: SuperQuadricParams
+    sample_size: int      = 30
+    rng                   = np.random.default_rng(random_seed)
     best_model: Optional[SuperQuadricParams] = None
     best_inliers: np.ndarray = np.empty((0,), dtype=bool)
-    best_count: int = -1
+    best_count: int       = -1
     if consensus_metric is None:
         consensus_metric = error_metric
-    #sampling from gair set
-    size_sample=min(np.size(refined_set_index),sample_size)
+    size_sample = min(np.size(refined_set_index), sample_size)
     for _ in range(n_iters):
         sample_idx = rng.choice(refined_set_index, size=size_sample, replace=False)
-        points = point_cloud[sample_idx]
-        # model estimation via pca
+        points     = point_cloud[sample_idx]
         try:
             model = fit_superquadric_ls(
                 points,
@@ -174,10 +155,12 @@ def inner_ransac(
             best_model = model
             best_inliers = np.asarray(inlier_set_index, dtype=bool)
 
-    # after loop: build result
     if best_count < 0 or best_model is None:
-        return InnerRansacResult(best_model=SuperQuadricParams(1,1,1,1,1,[0,0,0],[0,0,0]),best_inlier_count=0,best_inliers_mask=np.empty((0,), dtype=bool))
-    # final refit using all inliers for better accuracy
+        return InnerRansacResult(
+            best_model=SuperQuadricParams(1, 1, 1, 1, 1, [0, 0, 0], [0, 0, 0]),
+            best_inlier_count=0,
+            best_inliers_mask=np.empty((0,), dtype=bool),
+        )
     inlier_points = actual_points[best_inliers]
     if inlier_points.shape[0] >= 11:
         try:
@@ -200,7 +183,5 @@ def inner_ransac(
                 best_inliers = np.asarray(refit_inlier_set_index, dtype=bool)
         except Exception:
             pass
-    result = InnerRansacResult(best_model=best_model,best_inlier_count=best_count,best_inliers_mask=best_inliers)
-    return result
+    return InnerRansacResult(best_model=best_model, best_inlier_count=best_count, best_inliers_mask=best_inliers)
 
-        
