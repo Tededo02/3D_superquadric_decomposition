@@ -26,7 +26,7 @@ from src.visualizations import plot as vis
 
 # ── config ────────────────────────────────────────────────────────────────────
 VISUALIZE    = True   # set to False to skip visualization and run headlessly
-PC_DIR       = ROOT / "data"
+PC_DIR       = ROOT / "data" / "point_clouds"
 THRESHOLD    = 0.9
 GRAPH_RADIUS = 0.1
 MAX_MODELS   = 5
@@ -40,7 +40,7 @@ N_OUTLIERS   = 130    # constant uniform outliers injected per trial (0 = none)
 NOISE        = 0.0    # Gaussian noise std on positions and normals (0.0 = none)
 MAX_LOAD_PTS = 8000   # random subsample cap after background removal (None = no cap)
 MAX_COVER_ITER = 1000 # combinatorial cap for exhaustive set-cover search
-PC_CONFIGS_PATH = Path(__file__).parent / "experiments" / "pc_configs.json"
+PC_CONFIGS_PATH = Path(__file__).parent / "data" / "pc_configs.json"
 # ──────────────────────────────────────────────────────────────────────────────
 
 
