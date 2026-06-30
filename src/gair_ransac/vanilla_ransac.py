@@ -62,7 +62,7 @@ def vanilla_ransac(
             )
 
             try:
-                H_j: SuperQuadricParams = fit_superquadric_ls(M_j, error_metric="first_order")
+                H_j: SuperQuadricParams = fit_superquadric_ls(M_j, error_metric="radial")
             except Exception:
                 continue
 

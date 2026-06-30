@@ -65,7 +65,7 @@ def generate_point_cloud():
 
 def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int):
     t0 = time.perf_counter()
-    models, inliers_masks, _ = gair_ransac(
+    models, inliers_masks, _, _ = gair_ransac(
         points,
         normals,
         threshold=THRESHOLD,

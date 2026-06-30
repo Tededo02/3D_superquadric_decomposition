@@ -35,12 +35,13 @@ def build_radius_graph(
         effective_radius = float(radius) * extent
     else:
         effective_radius = float(radius)
-    if effective_radius <= 0.0:
-        return [[] for _ in range(n_points)], np.empty((0, 2), dtype=np.int64)
-
     tree = cKDTree(points)
     max_query_k = min(n_points, int(m_neighbors) + 1)
-    dists, idxs = tree.query(points, k=max_query_k, distance_upper_bound=effective_radius)
+    if effective_radius <= 0.0:
+        # Non-positive radius means "connect each point to its m nearest neighbors".
+        dists, idxs = tree.query(points, k=max_query_k)
+    else:
+        dists, idxs = tree.query(points, k=max_query_k, distance_upper_bound=effective_radius)
     dists = np.asarray(dists, dtype=np.float64).reshape(n_points, max_query_k)
     idxs = np.asarray(idxs, dtype=np.int64).reshape(n_points, max_query_k)
 

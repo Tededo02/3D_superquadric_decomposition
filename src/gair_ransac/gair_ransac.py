@@ -7,10 +7,6 @@ from .inner_ransac import inner_ransac, fit_superquadric_ls, InnerRansacResult
 from .gair import gair
 from .initgraph import build_radius_graph
 from .mss import adaptive_local_fps_mss
-from .mss import (
-    adaptive_local_fps_mss,
-)
-from .inner_ransac import InnerRansacResult
 from numpy.typing import NDArray
 
 FloatArray = NDArray[np.float64]
@@ -35,6 +31,20 @@ def _point_subset_mask(points: FloatArray, subset_points: np.ndarray, atol: floa
     for sample_point in subset_points:
         mask |= np.all(np.isclose(points, sample_point, atol=atol, rtol=0.0), axis=1)
     return mask
+
+
+def _center_opposes_inlier_normals(
+    model: SuperQuadricParams,
+    inlier_points: FloatArray,
+    inlier_normals: FloatArray,
+    min_fraction: float = 0.70,
+) -> bool:
+    if inlier_points.shape[0] == 0:
+        return False
+    center_direction = np.asarray(model.t, dtype=np.float64) - inlier_points
+    normal_dot = np.einsum("ij,ij->i", center_direction, inlier_normals, optimize=True)
+    opposite_fraction = float(np.mean(normal_dot < 0.0))
+    return opposite_fraction >= min_fraction
 
 
 def _sample_superquadric_surface(model: "SuperQuadricParams", n: int = 1000) -> FloatArray:
@@ -229,6 +239,14 @@ def gair_ransac(
                     best_count   = refit_count
             except Exception:
                 pass
+
+        if mss_normals is not None and not _center_opposes_inlier_normals(
+            best_model,
+            current_point_cloud[best_inliers],
+            V[best_inliers],
+        ):
+            remaining_indices = remaining_indices[~best_inliers]
+            continue
 
         # Reject models whose superquadric surface is sparsely supported by inliers
         if min_coverage > 0.0:

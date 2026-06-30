@@ -2,19 +2,15 @@ import numpy as np
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from src.superquadrics.superquadric_residual import superquadric_normal_world,superquadric_residual_vector
 
-DEFAULT_NORMAL_COS_THRESHOLD = 0.0
+DEFAULT_NORMAL_COS_THRESHOLD = 0.3
 
 
 def distance_err(
     model: SuperQuadricParams,
     points: np.ndarray,
-    error_metric: str = "first_order",
+    error_metric: str = "radial",
 ) -> np.ndarray:
-    d = superquadric_residual_vector(
-        model,
-        points,
-        metric="radial" if error_metric == "first_order" else error_metric,
-    )
+    d = superquadric_residual_vector(model, points, metric=error_metric)
     return np.abs(d)
 
 def normal_alignment_score(
@@ -35,7 +31,7 @@ def compute_consensus(
     model: SuperQuadricParams,
     points: np.ndarray,
     threshold: float,
-    error_metric: str = "mix",
+    error_metric: str = "radial",
     normals: np.ndarray | None = None,
     normal_cos_threshold: float | None = None,
 ) -> np.ndarray[bool]:
@@ -52,7 +48,7 @@ def expanded_removal_mask(
     points: np.ndarray,
     threshold: float,
     factor: float = 1.5,
-    error_metric: str = "mix",
+    error_metric: str = "radial",
     normals: np.ndarray | None = None,
     normal_cos_threshold: float | None = None,
 ) -> np.ndarray:

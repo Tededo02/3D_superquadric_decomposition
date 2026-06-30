@@ -197,7 +197,7 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
 
     _add_meshes_to_plotter(pl, meshes, colors=colors, opacity=0.65)
 
-    # --- punti (se presenti) ---
+    # --- points (if present) ---
     n_points_total = 0
     if points is not None:
         n_points_total = points.shape[0] # total number of points across all meshes

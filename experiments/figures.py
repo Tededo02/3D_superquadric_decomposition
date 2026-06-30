@@ -121,7 +121,7 @@ def main():
         save_screenshots("fig2_before", meshes_before, points, colors_before, OUT_DIR)
 
     print("\n=== Figure 2: after (GAIR-RANSAC) ===")
-    models_after, _, _ = gair_ransac(
+    models_after, _, _, _ = gair_ransac(
         points, normals,
         threshold=THRESHOLD,
         max_models=MAX_MODELS,

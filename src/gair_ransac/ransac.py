@@ -22,7 +22,7 @@ def ransac(
     max_iterations: int = 300,
     sample_size: int = 30,
     min_inliers: int = 30,
-    error_metric: str = "mix",
+    error_metric: str = "radial",
     consensus_metric: str = "radial",
     inner_iterations: int = 50,
     random_seed: int | None = None,
@@ -49,7 +49,7 @@ def ransac(
             sample_pts: FloatArray = current_point_cloud[idx]
 
             try:
-                H_j: SuperQuadricParams = fit_superquadric_ls(sample_pts, error_metric="first_order")
+                H_j: SuperQuadricParams = fit_superquadric_ls(sample_pts, error_metric="radial")
             except Exception:
                 continue
 

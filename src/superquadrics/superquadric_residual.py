@@ -155,7 +155,7 @@ def superquadric_normal_world(
 # computes the ray from the center of the superquadric to each point in space
 # then finds the respective point on the surface
 # then computes the length of the segment from the surface to the point
-def superquadric_radial_residual(model: SuperQuadricParams, points: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+def  superquadric_radial_residual(model: SuperQuadricParams, points: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     _, pc = _points_in_canonical_frame(model, points)
     r = np.maximum(np.linalg.norm(pc, axis=1), eps)
     shape_value = _superquadric_shape_value_from_pc(model, pc)
@@ -336,7 +336,7 @@ def superquadric_combo(model: SuperQuadricParams, points: np.ndarray, eps: float
 def superquadric_residual_vector(
     model: SuperQuadricParams,
     points: np.ndarray,
-    metric: str = "mix",
+    metric: str = "radial",
     eps: float = 1e-12,
 ) -> np.ndarray:
     metric_name = metric.lower().replace("-", "_").replace(" ", "_")

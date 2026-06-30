@@ -207,43 +207,54 @@ def inner_ransac(
     n_iters: int = 50,
     random_seed: int | None = None,
 ) -> InnerRansacResult:
-    point_cloud           = np.asarray(point_cloud, dtype=np.float64)
-    refined_set_index     = np.asarray(refined_set_index, dtype=np.int64)
-    actual_points         = point_cloud if actual_set_index is None else point_cloud[np.asarray(actual_set_index, dtype=np.int64)]
-    actual_normals        = None if normals is None else np.asarray(normals, dtype=np.float64)
+    point_cloud = np.asarray(point_cloud, dtype=np.float64)
+    refined_set_index = np.asarray(refined_set_index, dtype=np.int64)
+    actual_set_index = None if actual_set_index is None else np.asarray(actual_set_index, dtype=np.int64)
+    actual_points = point_cloud if actual_set_index is None else point_cloud[actual_set_index]
+    if normals is None:
+        actual_normals = None
+    else:
+        normals = np.asarray(normals, dtype=np.float64)
+        actual_normals = normals if actual_set_index is None else normals[actual_set_index]
     bounds_reference_points = point_cloud[refined_set_index]
-    sample_size: int      = 30
-    rng                   = np.random.default_rng(random_seed)
+    sample_size: int = 30
+    rng = np.random.default_rng(random_seed)
     best_model: Optional[SuperQuadricParams] = None
-    best_inliers: np.ndarray = np.empty((0,), dtype=bool)
-    best_count: int       = -1
+    best_inliers: np.ndarray = np.zeros(actual_points.shape[0], dtype=bool)
+    best_count: int = -1
     if consensus_metric is None:
         consensus_metric = error_metric
+    if refined_set_index.size == 0 or actual_points.shape[0] == 0:
+        return InnerRansacResult(
+            best_model=SuperQuadricParams(1, 1, 1, 1, 1, [0, 0, 0], [0, 0, 0]),
+            best_inlier_count=0,
+            best_inliers_mask=np.empty((0,), dtype=bool),
+        )
     size_sample = min(np.size(refined_set_index), sample_size)
     for _ in range(n_iters):
         sample_idx = rng.choice(refined_set_index, size=size_sample, replace=False)
-        points     = point_cloud[sample_idx]
+        sampled_points = point_cloud[sample_idx]
         try:
             candidate_model = fit_superquadric_ls(
                 sampled_points,
                 error_metric=error_metric,
-                bounds_reference_points=fit_reference_points,
+                bounds_reference_points=bounds_reference_points,
             )
         except Exception:
             continue
 
         candidate_inlier_mask = compute_consensus(
             candidate_model,
-            evaluation_points,
+            actual_points,
             threshold,
-            error_metric=effective_consensus_metric,
-            normals=evaluation_normals,
+            error_metric=consensus_metric,
+            normals=actual_normals,
         )
         candidate_inlier_count = int(np.count_nonzero(candidate_inlier_mask))
-        if candidate_inlier_count > best_inlier_count:
+        if candidate_inlier_count > best_count:
             best_model = candidate_model
-            best_inlier_count = candidate_inlier_count
-            best_inlier_mask = candidate_inlier_mask.astype(bool, copy=False)
+            best_count = candidate_inlier_count
+            best_inliers = candidate_inlier_mask.astype(bool, copy=False)
 
     if best_count < 0 or best_model is None:
         return InnerRansacResult(
@@ -255,23 +266,22 @@ def inner_ransac(
     if inlier_points.shape[0] >= 11:
         try:
             refined_model = fit_superquadric_ls(
-                best_inlier_points,
+                inlier_points,
                 error_metric=error_metric,
-                bounds_reference_points=best_inlier_points,
+                bounds_reference_points=inlier_points,
             )
             refined_inlier_mask = compute_consensus(
                 refined_model,
-                evaluation_points,
+                actual_points,
                 threshold,
-                error_metric=effective_consensus_metric,
-                normals=evaluation_normals,
+                error_metric=consensus_metric,
+                normals=actual_normals,
             )
             refined_inlier_count = int(np.count_nonzero(refined_inlier_mask))
-            if refined_inlier_count >= best_inlier_count:
+            if refined_inlier_count >= best_count:
                 best_model = refined_model
-                best_inlier_count = refined_inlier_count
-                best_inlier_mask = refined_inlier_mask.astype(bool, copy=False)
+                best_count = refined_inlier_count
+                best_inliers = refined_inlier_mask.astype(bool, copy=False)
         except Exception:
             pass
     return InnerRansacResult(best_model=best_model, best_inlier_count=best_count, best_inliers_mask=best_inliers)
-

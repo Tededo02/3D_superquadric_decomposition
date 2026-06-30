@@ -6,7 +6,7 @@ import trimesh
 import numpy as np
 from scipy.spatial import cKDTree
 from src.superquadrics import superquadric_mesh as supmesh
-from src.visualizations import visualization as vis
+from src.visualizations import plot as vis
 from src.superquadrics import superquadric_sampling as samp
 from src.gair_ransac.inner_ransac import inner_ransac, fit_superquadric_ls
 from src.gair_ransac.ransac import ransac
@@ -29,7 +29,7 @@ PC_FILE = PROJECT_ROOT / "test_objects" / "cartoon_character.glb"
 # and from the reconstructed superquadrics for evaluation.
 SAMPLED_POINT_COUNT = 30000
 DEFAULT_BASE_SEED = 1234567932
-MAX_MODEL = 10
+MAX_MODEL = 1
 ALGORITHM = "gair-ransac" # options: "ls", "inner-ransac", "ransac", "gair-ransac", "gc-ransac"
 
 @dataclass(frozen=True)
@@ -202,7 +202,7 @@ def create_and_estimate_supq(
             colors.append(palette[i % len(palette)])
     elif algorithm in ("gair-ransac", "gc-ransac"):
         graph_radius = GRAPH_RADIUS
-        models, inliers_masks, total_best_mss_used = gair_ransac(
+        models, inliers_masks, total_best_mss_used, _ = gair_ransac(
             sampled_points,
             normals,
             threshold=effective_threshold,

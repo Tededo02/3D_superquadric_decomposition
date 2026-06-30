@@ -98,7 +98,6 @@ def gair(
             ww = w
             g.add_edges(nodeids[edge_p], nodeids[edge_q], ww, ww)
 
-    # IMPORTANT: choose mapping for labels:
     # We'll interpret:
     #   SOURCE side  -> outlier label (0)
     #   SINK side    -> inlier label (1)
