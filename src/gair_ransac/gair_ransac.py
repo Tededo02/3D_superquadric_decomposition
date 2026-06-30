@@ -76,7 +76,7 @@ def gair_ransac(
     min_inliers: int = 30,
     min_gain: int = 1,
     error_metric: str = "radial",
-    consensus_metric: str = "first_order",
+    consensus_metric: str = "radial",
     inner_iterations: int = 50,
     random_seed: int | None = None,
     min_coverage: float = 0.0,

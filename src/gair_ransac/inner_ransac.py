@@ -4,7 +4,10 @@ import numpy as np
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from scipy.optimize import least_squares
 from .consensus import compute_consensus
-from src.superquadrics.superquadric_residual import superquadric_radial_residual_and_jacobian,superquadric_residual_vector
+from src.superquadrics.superquadric_residual import superquadric_radial_residual_and_jacobian
+
+
+ROBUST_LOSS_SCALE_FACTOR = 0.02
 
 
 @dataclass
@@ -14,40 +17,47 @@ class InnerRansacResult:
     best_inliers_mask: np.ndarray
 
 def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
-    mean = np.mean(points, axis=0)
-    cov  = np.cov(points - mean, rowvar=False)
-    eigvals, eigvecs = np.linalg.eigh(cov)
-    idx     = np.argsort(eigvals)[::-1]
-    eigvecs = eigvecs[:, idx]
-    R = eigvecs
-    if np.linalg.det(R) < 0:
-        R[:, 2] *= -1.0
-    Xc          = (points - mean) @ R
-    q_low       = np.percentile(Xc, 5.0,  axis=0)
-    q_high      = np.percentile(Xc, 95.0, axis=0)
-    half_ranges = 0.5 * (q_high - q_low)
-    margin      = 1.05
-    a1 = max(margin * half_ranges[0], 1e-3)
-    a2 = max(margin * half_ranges[1], 1e-3)
-    a3 = max(margin * half_ranges[2], 1e-3)
-    sy = -R[2, 0]
-    sy    = np.clip(sy, -1.0, 1.0)
-    pitch = np.arcsin(sy)
-    cp    = np.cos(pitch)
-    if abs(cp) < 1e-8:
-        yaw  = 0.0
-        roll = np.arctan2(-R[0, 1], R[1, 1])
+    point_array = np.asarray(points, dtype=np.float64)
+
+    center = point_array.mean(axis=0)
+    centered_points = point_array - center
+    covariance = centered_points.T @ centered_points / max(point_array.shape[0] - 1, 1)
+    _, principal_axes = np.linalg.eigh(covariance)
+    rotation_matrix = principal_axes[:, ::-1]
+    if np.linalg.det(rotation_matrix) < 0:
+        rotation_matrix[:, 2] *= -1.0
+
+    pca_coordinates = centered_points @ rotation_matrix
+    lower_quantile = np.percentile(pca_coordinates, 5.0, axis=0)
+    upper_quantile = np.percentile(pca_coordinates, 95.0, axis=0)
+    semi_axes = np.maximum(0.525 * (upper_quantile - lower_quantile), 1e-3)
+
+    sin_pitch = np.clip(-rotation_matrix[2, 0], -1.0, 1.0)
+    pitch = np.arcsin(sin_pitch)
+    cos_pitch = np.cos(pitch)
+    if abs(cos_pitch) < 1e-8:
+        yaw = 0.0
+        roll = np.arctan2(-rotation_matrix[0, 1], rotation_matrix[1, 1])
     else:
-        roll = np.arctan2(R[2, 1], R[2, 2])
-        yaw  = np.arctan2(R[1, 0], R[0, 0])
-    rot = (yaw, pitch, roll)  # (yaw=z, pitch=y, roll=x)
-    return SuperQuadricParams(a1=a1, a2=a2, a3=a3, e1=1.0, e2=1.0, rot=np.array(rot), t=np.array(mean))
+        roll = np.arctan2(rotation_matrix[2, 1], rotation_matrix[2, 2])
+        yaw = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
+
+    return SuperQuadricParams(
+        a1=float(semi_axes[0]),
+        a2=float(semi_axes[1]),
+        a3=float(semi_axes[2]),
+        e1=1.8,
+        e2=1.8,
+        rot=np.array([yaw, pitch, roll], dtype=np.float64),
+        t=center.astype(np.float64, copy=False),
+    )
 
 def fit_superquadric_ls(
     points: np.ndarray,
     error_metric: str = "radial",
     bounds_reference_points: np.ndarray | None = None,
 ) -> SuperQuadricParams:
+    del error_metric
     point_array = np.asarray(points, dtype=np.float64)
     if point_array.shape[0] < 11:
         raise ValueError("too few points for a stable superqadric fit")
@@ -119,47 +129,13 @@ def fit_superquadric_ls(
         dtype=np.float64,
     )
     np.clip(initial_parameters, lower_bounds, upper_bounds, out=initial_parameters)
+    robust_loss_scale = max(1e-3, ROBUST_LOSS_SCALE_FACTOR * reference_diagonal)
 
-    normalized_metric = error_metric.lower().replace("-", "_").replace(" ", "_")
+    radial_cache: dict[str, np.ndarray | None] = {"parameters": None, "residuals": None, "jacobian": None}
 
-    # SciPy uses the keyword fun for the residual function to minimize.
-    if normalized_metric == "radial":
-        radial_cache: dict[str, np.ndarray | None] = {"parameters": None, "residuals": None, "jacobian": None}
-
-        def radial_residuals(parameters: np.ndarray) -> np.ndarray:
-            cached_parameters = radial_cache["parameters"]
-            if cached_parameters is None or not np.array_equal(cached_parameters, parameters):
-                current_model = SuperQuadricParams(
-                    a1=parameters[0],
-                    a2=parameters[1],
-                    a3=parameters[2],
-                    e1=parameters[3],
-                    e2=parameters[4],
-                    rot=np.array(parameters[5:8], dtype=np.float64),
-                    t=np.array(parameters[8:11], dtype=np.float64),
-                )
-                residuals, jacobian = superquadric_radial_residual_and_jacobian(current_model, point_array)
-                radial_cache["parameters"] = np.array(parameters, dtype=np.float64, copy=True)
-                radial_cache["residuals"] = residuals
-                radial_cache["jacobian"] = jacobian
-            return radial_cache["residuals"]
-
-        def radial_jacobian(parameters: np.ndarray) -> np.ndarray:
-            radial_residuals(parameters)
-            return radial_cache["jacobian"]
-
-        optimization_result = least_squares(
-            fun=radial_residuals,
-            jac=radial_jacobian,
-            x0=initial_parameters,
-            method="trf",
-            bounds=(lower_bounds, upper_bounds),
-            loss="soft_l1",
-            f_scale=1.0,
-            max_nfev=250,
-        )
-    else:
-        def residuals(parameters: np.ndarray) -> np.ndarray:
+    def radial_residuals(parameters: np.ndarray) -> np.ndarray:
+        cached_parameters = radial_cache["parameters"]
+        if cached_parameters is None or not np.array_equal(cached_parameters, parameters):
             current_model = SuperQuadricParams(
                 a1=parameters[0],
                 a2=parameters[1],
@@ -169,17 +145,29 @@ def fit_superquadric_ls(
                 rot=np.array(parameters[5:8], dtype=np.float64),
                 t=np.array(parameters[8:11], dtype=np.float64),
             )
-            return superquadric_residual_vector(current_model, point_array, metric=error_metric)
+            residuals, jacobian = superquadric_radial_residual_and_jacobian(
+                current_model,
+                point_array,
+            )
+            radial_cache["parameters"] = np.array(parameters, dtype=np.float64, copy=True)
+            radial_cache["residuals"] = residuals
+            radial_cache["jacobian"] = jacobian
+        return radial_cache["residuals"]
 
-        optimization_result = least_squares(
-            fun=residuals,
-            x0=initial_parameters,
-            method="trf",
-            bounds=(lower_bounds, upper_bounds),
-            loss="soft_l1",
-            f_scale=1.0,
-            max_nfev=250,
-        )
+    def radial_jacobian(parameters: np.ndarray) -> np.ndarray:
+        radial_residuals(parameters)
+        return radial_cache["jacobian"]
+
+    optimization_result = least_squares(
+        fun=radial_residuals,
+        jac=radial_jacobian,
+        x0=initial_parameters,
+        method="trf",
+        bounds=(lower_bounds, upper_bounds),
+        loss="soft_l1",
+        f_scale=robust_loss_scale,
+        max_nfev=250,
+    )
 
     if not optimization_result.success:
         raise RuntimeError(f"least_squares failed: {optimization_result.message}")
@@ -202,7 +190,7 @@ def inner_ransac(
     actual_set_index: np.ndarray | None,
     threshold: float,
     normals: np.ndarray | None = None,
-    error_metric: str = "mix",
+    error_metric: str = "radial",
     consensus_metric: str | None = None,
     n_iters: int = 50,
     random_seed: int | None = None,
