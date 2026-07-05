@@ -23,7 +23,6 @@ from src.visualizations import visualization as vis
 VISUALIZE    = False
 NOISE_STD    = 0.4
 THRESHOLD    = 2.5 * NOISE_STD
-GRAPH_RADIUS = 0.08
 N_POINTS      = 30000    # surface points
 N_OUTLIERS   = 0     # random outliers injected
 N_EVAL       = 4000     # clean reference points for metric evaluation
@@ -72,8 +71,9 @@ def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int):
         max_models=len(GT_PARAMS),
         max_iterations=MAX_ITER,
         inner_iterations=INNER_ITER,
-        radius=GRAPH_RADIUS,
         min_coverage=0.4,
+        sample_size=25,
+        m_neighbors=6,
         random_seed=seed,
         use_normal_coherence=(algorithm == "gair-ransac"),
     )

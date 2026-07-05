@@ -5,7 +5,7 @@ from src.superquadrics.superquadric_param import SuperQuadricParams
 from .consensus import compute_consensus, expanded_removal_mask
 from .inner_ransac import inner_ransac, fit_superquadric_ls, InnerRansacResult
 from .gair import gair
-from .initgraph import build_radius_graph
+from .initgraph import build_knn_graph
 from .mss import adaptive_local_fps_mss
 from numpy.typing import NDArray
 
@@ -31,6 +31,17 @@ def _point_subset_mask(points: FloatArray, subset_points: np.ndarray, atol: floa
     for sample_point in subset_points:
         mask |= np.all(np.isclose(points, sample_point, atol=atol, rtol=0.0), axis=1)
     return mask
+
+
+def _induced_subgraph_edges(edges: IntArray, remaining_indices: IntArray, n_points: int) -> IntArray:
+    if edges.size == 0 or remaining_indices.size == 0:
+        return np.empty((0, 2), dtype=np.int64)
+
+    global_to_local = np.full(n_points, -1, dtype=np.int64)
+    global_to_local[remaining_indices] = np.arange(remaining_indices.size, dtype=np.int64)
+    local_edges = global_to_local[edges]
+    keep_edges = np.all(local_edges >= 0, axis=1)
+    return local_edges[keep_edges]
 
 
 def _center_opposes_inlier_normals(
@@ -70,8 +81,6 @@ def gair_ransac(
     max_models: int = 1,
     max_iterations: int = 300,
     m_neighbors: int = 12,
-    radius: float = 0.06,
-    radius_is_relative: bool = True,
     sample_size: int = 50,
     min_inliers: int = 30,
     min_gain: int = 1,
@@ -84,7 +93,6 @@ def gair_ransac(
 ) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None, int]:
     total_best_mss_used: FloatArray | None = None
     total_local_opts: int = 0
-    min_inliers = 5
 
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     if use_normal_coherence is None:
@@ -96,6 +104,11 @@ def gair_ransac(
     rng = np.random.default_rng(random_seed)
     n_points: int = point_cloud.shape[0]
     remaining_indices: IntArray = np.arange(n_points, dtype=np.int64)
+    _, full_edge = build_knn_graph(
+        point_cloud,
+        m_neighbors=m_neighbors,
+    )
+    full_edge: IntArray = np.asarray(full_edge, dtype=np.int64)
     models_set: list[SuperQuadricParams] = []
     inliers_set: list[BoolArray] = []
 
@@ -110,13 +123,7 @@ def gair_ransac(
         best_model: Optional[SuperQuadricParams] = None
         best_inliers: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
 
-        _, edge = build_radius_graph(
-            current_point_cloud,
-            m_neighbors=m_neighbors,
-            radius=radius,
-            radius_is_relative=radius_is_relative,
-        )
-        edge: IntArray = np.asarray(edge, dtype=np.int64)
+        edge: IntArray = _induced_subgraph_edges(full_edge, remaining_indices, n_points)
         best_mss_used: FloatArray | None = None
 
         for j in range(max_iterations):
@@ -125,6 +132,8 @@ def gair_ransac(
                     current_point_cloud,
                     normals=V_mss,
                     sample_size=sample_size,
+                    initial_k=60,
+                    candidate_multiplier=3,
                     rng=rng,
                 ),
                 dtype=np.float64,
@@ -257,7 +266,6 @@ def gair_ransac(
             dists, _        = tree_inliers.query(surface_samples, k=1)
             coverage        = float((dists < threshold).mean())
             if coverage < min_coverage:
-                remaining_indices = remaining_indices[~best_inliers]
                 continue
 
         global_inliers: BoolArray = np.zeros(n_points, dtype=bool)
@@ -275,7 +283,7 @@ def gair_ransac(
             best_model,
             current_point_cloud,
             threshold,
-            factor=1.2,
+            factor=1.0,
             error_metric=consensus_metric,
             normals=V if use_normal_coherence else None,
         )

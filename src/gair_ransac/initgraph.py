@@ -4,21 +4,10 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 
-def point_cloud_spatial_extent(points: np.ndarray) -> float:
-    # Use the bounding-box diagonal as a global scale for the cloud.
-    if points.size == 0:
-        return 0.0
-
-    spans = np.ptp(points, axis=0)
-    return float(np.linalg.norm(spans))
-
-
-# Return the neighbors within the chosen radius for each point and the edge list (i, j) with i < j.
-def build_radius_graph(
+# Return up to m nearest neighbors for each point and the edge list (i, j) with i < j.
+def build_knn_graph(
     points: np.ndarray,
     m_neighbors: int = 12,
-    radius: float = 0.06,
-    radius_is_relative: bool = True,
 ) -> tuple[list[list[int]], np.ndarray]:
     points = np.asarray(points, dtype=np.float64)
     if points.ndim != 2:
@@ -29,19 +18,9 @@ def build_radius_graph(
         return [], np.empty((0, 2), dtype=np.int64)
     if m_neighbors <= 0:
         return [[] for _ in range(n_points)], np.empty((0, 2), dtype=np.int64)
-    if radius_is_relative:
-        # The paper sets the graph radius as a function of the point-cloud spatial extension.
-        extent = point_cloud_spatial_extent(points)
-        effective_radius = float(radius) * extent
-    else:
-        effective_radius = float(radius)
     tree = cKDTree(points)
     max_query_k = min(n_points, int(m_neighbors) + 1)
-    if effective_radius <= 0.0:
-        # Non-positive radius means "connect each point to its m nearest neighbors".
-        dists, idxs = tree.query(points, k=max_query_k)
-    else:
-        dists, idxs = tree.query(points, k=max_query_k, distance_upper_bound=effective_radius)
+    dists, idxs = tree.query(points, k=max_query_k)
     dists = np.asarray(dists, dtype=np.float64).reshape(n_points, max_query_k)
     idxs = np.asarray(idxs, dtype=np.int64).reshape(n_points, max_query_k)
 

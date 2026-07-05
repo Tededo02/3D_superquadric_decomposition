@@ -12,25 +12,24 @@ from src.superquadrics import superquadric_mesh as supmesh
 from src.visualizations import viz_rpc as vis
 
 
-PC_NAME = "etp_no_floor.ply"
+PC_NAME = "car_pc_resized_100000.ply"
 
 ROOT = Path(__file__).resolve().parent
 PC_DIR = ROOT / "test_objects" / "real_pc"
 TEST_OBJECTS_DIR = ROOT / "test_objects"
 SUPPORTED_INPUT_EXTENSIONS = {".ply", ".stl"}
-K_NEIGHBORS = 20
-THRESHOLD = 0.0025 # if 0 use point spacing to compute effective threshold
+K_NEIGHBORS = 80
+THRESHOLD = 0.015 # if 0 use point spacing to compute effective threshold
 THRESHOLD_SPACING_FACTOR = 2.0
-GRAPH_RADIUS = 0.005
-M_NEIGHBORS = 6
-MAX_MODELS = 5
-MAX_ITERATIONS = 10
-INNER_ITERATIONS = 100
-SAMPLE_SIZE = 20
-MIN_INLIERS = 100
-MIN_COVERAGE = 0.0
+M_NEIGHBORS = 11
+MAX_MODELS = 15
+MAX_ITERATIONS = 40
+INNER_ITERATIONS = 80
+SAMPLE_SIZE = 35
+MIN_INLIERS = 600
+MIN_COVERAGE = 0.14
 MSS_MAX_POOL_FRACTION = 0.18
-RANDOM_SEED = 123456745
+RANDOM_SEED = 1234567
 MESH_SAMPLE_COUNT = 30000
 
 
@@ -202,8 +201,6 @@ def main(argv: list[str] | None = None) -> int:
         inner_iterations=INNER_ITERATIONS,
         use_normal_coherence=True,
         normals=normals,
-        radius=GRAPH_RADIUS,
-        radius_is_relative=True,
         random_seed=args.seed,
         min_coverage=MIN_COVERAGE,
     )

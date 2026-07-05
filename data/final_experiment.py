@@ -23,7 +23,6 @@ from src.visualizations import visualization as vis
 VISUALIZE  = False   # set to False to skip visualization and run all trials headlessly
 PC_FILE    = ROOT / "src" / "point_clouds" / "mushroom.glb"
 THRESHOLD  = 0.1
-GRAPH_RADIUS = 0.06
 MAX_MODELS = 2
 MAX_ITER   = 5
 INNER_ITER = 100
@@ -55,7 +54,6 @@ def run_one(points, normals, algorithm: str, seed: int):
         max_models=MAX_MODELS,
         max_iterations=MAX_ITER,
         inner_iterations=INNER_ITER,
-        radius=GRAPH_RADIUS,
         use_normal_coherence=use_normal_coherence,
         min_coverage=0.4,
         random_seed=seed,

@@ -19,17 +19,16 @@ THRESHOLD_SPACING_FACTOR = 0.5
 NOISE_STD=0.0
 THRESHOLD = 0.02#THRESHOLD_SCALE * NOISE_STD
 NOISE_NORMAL_STD=0.0
-GRAPH_RADIUS = 0.06
-SAMPLE_SIZE = 30
-MIN_INLIERS = 30
+SAMPLE_SIZE = 40
+MIN_INLIERS = 40
 PROJECT_ROOT = Path(__file__).resolve().parent
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "cartoon_character.glb"
+PC_FILE = PROJECT_ROOT / "test_objects" / "cat1_0_0.2.ply"
 # Single knob for how many points are sampled from the input mesh
 # and from the reconstructed superquadrics for evaluation.
 SAMPLED_POINT_COUNT = 30000
-DEFAULT_BASE_SEED = 1234567932
-MAX_MODEL = 1
+DEFAULT_BASE_SEED = 12345679
+MAX_MODEL = 4
 ALGORITHM = "gair-ransac" # options: "ls", "inner-ransac", "ransac", "gair-ransac", "gc-ransac"
 
 @dataclass(frozen=True)
@@ -184,14 +183,12 @@ def create_and_estimate_supq(
         list_mesh.append(supmesh.superquadric_mesh(theta0.best_model))
         colors.append("lightgreen")
     elif algorithm == "ransac":
-        graph_radius = GRAPH_RADIUS
         models, inliers_masks = ransac(
             sampled_points,
             threshold=effective_threshold,
             max_models=max_models,
             max_iterations=20,
             inner_iterations=100,
-            radius=graph_radius,
             graphcut=True,
             random_seed=run_seeds.algorithm,
         )
@@ -201,7 +198,6 @@ def create_and_estimate_supq(
             list_mesh.append(supmesh.superquadric_mesh(model))
             colors.append(palette[i % len(palette)])
     elif algorithm in ("gair-ransac", "gc-ransac"):
-        graph_radius = GRAPH_RADIUS
         models, inliers_masks, total_best_mss_used, _ = gair_ransac(
             sampled_points,
             normals,
@@ -209,7 +205,6 @@ def create_and_estimate_supq(
             max_models=max_models,
             max_iterations=40,
             inner_iterations=200,
-            radius=graph_radius,
             use_normal_coherence=(algorithm == "gair-ransac"),
             min_coverage=0.0,
             random_seed=run_seeds.algorithm,

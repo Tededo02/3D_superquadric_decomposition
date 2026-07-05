@@ -227,3 +227,4 @@ im_obj/
 .gitignore
 .vscode
 .DS_Store
+data/point_clouds/

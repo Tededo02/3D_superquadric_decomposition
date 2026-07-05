@@ -28,7 +28,6 @@ from src.superquadrics import superquadric_mesh as supmesh
 PC_FILE      = ROOT / "src" / "point_clouds" / "mushroom.glb"
 OUT_DIR      = ROOT / "experiments" / "artifacts" / "figures"
 THRESHOLD    = 0.1
-GRAPH_RADIUS = 0.06
 MAX_MODELS   = 2
 MAX_ITER     = 5
 INNER_ITER   = 100
@@ -127,7 +126,6 @@ def main():
         max_models=MAX_MODELS,
         max_iterations=MAX_ITER,
         inner_iterations=INNER_ITER,
-        radius=GRAPH_RADIUS,
         use_normal_coherence=True,
         min_coverage=0.4,
         random_seed=SEED,

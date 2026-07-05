@@ -27,19 +27,18 @@ from src.visualizations import plot as vis
 # ── config ────────────────────────────────────────────────────────────────────
 VISUALIZE    = True   # set to False to skip visualization and run headlessly
 PC_DIR       = ROOT / "data" / "point_clouds"
-THRESHOLD    = 0.9
-GRAPH_RADIUS = 0.1
+THRESHOLD    = 0.1
 MAX_MODELS   = 5
-MAX_ITER     = 100
-INNER_ITER   = 100
+MAX_ITER     = 30
+INNER_ITER   = 50
 N_TRIALS     = 50
 K            = 3
 EVAL_SEED    = 42     # fixed so Chamfer is comparable across trials
 OUT_DIR      = ROOT / "data" / "results"
-N_OUTLIERS   = 130    # constant uniform outliers injected per trial (0 = none)
+N_OUTLIERS   = 0    # constant uniform outliers injected per trial (0 = none)
 NOISE        = 0.0    # Gaussian noise std on positions and normals (0.0 = none)
 MAX_LOAD_PTS = 8000   # random subsample cap after background removal (None = no cap)
-MAX_COVER_ITER = 1000 # combinatorial cap for exhaustive set-cover search
+MAX_COVER_ITER = 0 # combinatorial cap for exhaustive set-cover search
 PC_CONFIGS_PATH = Path(__file__).parent / "data" / "pc_configs.json"
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -63,17 +62,6 @@ def _subsample(points: np.ndarray, max_pts: int | None):
     return points[idx], idx
 
 
-def _drop_background_color(points: np.ndarray, colors_rgba: np.ndarray):
-    """Remove points whose color is the dominant one (>50% of cloud = background)."""
-    from collections import Counter
-    rgb = np.asarray(colors_rgba, dtype=np.uint8)[:, :3]
-    bg_color, bg_count = Counter(map(tuple, rgb)).most_common(1)[0]
-    if bg_count / len(points) <= 0.5:
-        return points, np.ones(len(points), dtype=bool)
-    mask = np.array([tuple(c) != bg_color for c in rgb])
-    return points[mask], mask
-
-
 def load_point_cloud(path: Path):
     scene = trimesh.load(str(path))
     if isinstance(scene, trimesh.Scene):
@@ -84,12 +72,7 @@ def load_point_cloud(path: Path):
     points = np.asarray(mesh_raw.vertices, dtype=np.float64)
 
     if isinstance(mesh_raw, trimesh.PointCloud):
-        colors = getattr(mesh_raw, "colors", None)
-        if colors is not None and len(colors):
-            points, keep = _drop_background_color(points, colors)
-        else:
-            keep = np.ones(len(points), dtype=bool)
-
+        keep = np.ones(len(points), dtype=bool)
         points, sub_idx = _subsample(points, MAX_LOAD_PTS)
 
         normals_path = path.parent / f"normals_{path.name}"
@@ -107,8 +90,10 @@ def load_point_cloud(path: Path):
 
     bb_min, bb_max = points.min(axis=0), points.max(axis=0)
     bb_size = bb_max - bb_min
-    bb_size[bb_size == 0] = 1.0
-    points = (points - bb_min) / bb_size
+    scale = float(np.max(bb_size))
+    if scale <= 0.0:
+        scale = 1.0
+    points = (points - bb_min) / scale
     print(f"  bounding box after normalization: min={points.min(axis=0)}  max={points.max(axis=0)}")
 
     return points, normals
@@ -194,10 +179,11 @@ def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int, p
             max_models=MAX_MODELS,
             max_iterations=MAX_ITER,
             inner_iterations=INNER_ITER,
-            radius=GRAPH_RADIUS,
             min_coverage=0.4,
             random_seed=seed,
-            sample_size=pc_cfg.get("mss_sample_size", 50),
+            sample_size=pc_cfg.get("mss_sample_size", 20),
+            m_neighbors=pc_cfg.get("m_neighbors", 6),
+            min_inliers=20,
         )
     runtime = time.perf_counter() - t0
 
@@ -268,7 +254,7 @@ def run_for_pc(pc_file: Path, rng: np.random.Generator):
 
     trial_seeds   = [int(rng.integers(0, 2**31)) for _ in range(N_TRIALS)]
     outlier_fracs = [round(x * 0.05, 2) for x in range(9)]  # 0.0, 0.05, ..., 0.40
-    algorithms    = ["gair-ransac", "gc-ransac", "lo-ransac", "vanilla"]
+    algorithms    = ["gair-ransac"]
 
     pc_out_dir = OUT_DIR / pc_file.stem
     pc_out_dir.mkdir(parents=True, exist_ok=True)

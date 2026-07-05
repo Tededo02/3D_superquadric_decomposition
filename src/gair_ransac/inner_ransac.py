@@ -8,6 +8,8 @@ from src.superquadrics.superquadric_residual import superquadric_radial_residual
 
 
 ROBUST_LOSS_SCALE_FACTOR = 0.02
+AXIS_UPPER_FACTOR = 1.6
+AXIS_UPPER_FLOOR_FACTOR = 0.18
 
 
 @dataclass
@@ -46,11 +48,23 @@ def pca_initialization(points: np.ndarray) -> SuperQuadricParams:
         a1=float(semi_axes[0]),
         a2=float(semi_axes[1]),
         a3=float(semi_axes[2]),
-        e1=1.8,
-        e2=1.8,
+        e1=1.5,
+        e2=1.5,
         rot=np.array([yaw, pitch, roll], dtype=np.float64),
         t=center.astype(np.float64, copy=False),
     )
+
+
+def _reference_axis_upper_bounds(
+    reference_axes: np.ndarray,
+    reference_diagonal: float,
+    min_axis_length: float,
+    global_max_axis_length: float,
+) -> np.ndarray:
+    axis_floor = max(min_axis_length, AXIS_UPPER_FLOOR_FACTOR * reference_diagonal)
+    upper_bounds = np.maximum(AXIS_UPPER_FACTOR * reference_axes, axis_floor)
+    return np.clip(upper_bounds, min_axis_length, global_max_axis_length)
+
 
 def fit_superquadric_ls(
     points: np.ndarray,
@@ -69,12 +83,23 @@ def fit_superquadric_ls(
     reference_points = point_array if bounds_reference_points is None else np.asarray(bounds_reference_points, dtype=np.float64)
     if reference_points.shape[0] == 0:
         raise ValueError("bounds_reference_points must contain at least one point")
+    reference_model = initial_model if bounds_reference_points is None else pca_initialization(reference_points)
+    reference_axes = np.array(
+        [reference_model.a1, reference_model.a2, reference_model.a3],
+        dtype=np.float64,
+    )
 
     reference_min = reference_points.min(axis=0)
     reference_max = reference_points.max(axis=0)
     reference_diagonal = float(np.linalg.norm(reference_max - reference_min) + 1e-12)
     min_axis_length = max(1e-3, 5e-2 * reference_diagonal)
-    max_axis_length = max(1e-2, 1.2 * reference_diagonal)
+    global_max_axis_length = max(1e-2, 1.2 * reference_diagonal)
+    max_axis_lengths = _reference_axis_upper_bounds(
+        reference_axes,
+        reference_diagonal,
+        min_axis_length,
+        global_max_axis_length,
+    )
     exponent_min, exponent_max = 0.08, 4.0
     angle_min, angle_max = -np.pi, np.pi
     translation_margin = 0.25 * reference_diagonal
@@ -97,9 +122,9 @@ def fit_superquadric_ls(
     )
     upper_bounds = np.array(
         [
-            max_axis_length,
-            max_axis_length,
-            max_axis_length,
+            max_axis_lengths[0],
+            max_axis_lengths[1],
+            max_axis_lengths[2],
             exponent_max,
             exponent_max,
             angle_max,
@@ -166,7 +191,7 @@ def fit_superquadric_ls(
         bounds=(lower_bounds, upper_bounds),
         loss="soft_l1",
         f_scale=robust_loss_scale,
-        max_nfev=250,
+        max_nfev=1000,
     )
 
     if not optimization_result.success:
