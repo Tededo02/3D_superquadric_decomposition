@@ -3,7 +3,7 @@
     "threshold": 0.03,
     "mss_sample_size": 50,
     "mss_pts_per_patch": 5,
-    "mss_voxel_spacing_factor": 30
+    "mss_voxel_spacing_factor": 150
   },
   "supersingle0_0_0": {
     "threshold": 0.03,
