@@ -32,14 +32,15 @@ GRAPH_RADIUS = 0.1
 MAX_MODELS   = 10
 MAX_ITER     = 20
 INNER_ITER   = 25
-N_TRIALS     = 20
+N_TRIALS     = 5
 K            = 1
 EVAL_SEED    = 42     # fixed so Chamfer is comparable across trials
 OUT_DIR      = ROOT / "data" / "results"
 N_OUTLIERS   = 0    # constant uniform outliers injected per trial (0 = none)
 NOISE        = 0.0    # Gaussian noise std on positions and normals (0.0 = none)
 MAX_LOAD_PTS = 8000   # random subsample cap after background removal (None = no cap)
-MAX_COVER_ITER = 0 # combinatorial cap for exhaustive set-cover search
+MAX_COVER_ITER = 1000 # combinatorial cap for exhaustive set-cover search
+COVER_METHODS  = ("ransacov",)  # set-cover methods to run; add "exhaustive" back in to re-enable it
 PC_CONFIGS_PATH = Path(__file__).parent / "data" / "pc_configs.json"
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -257,8 +258,8 @@ def run_for_pc(pc_file: Path, rng: np.random.Generator):
     print(f"  {n_clean} points loaded  |  config: {pc_cfg}")
 
     trial_seeds   = [int(rng.integers(0, 2**31)) for _ in range(N_TRIALS)]
-    outlier_fracs = [round(x * 0.05, 2) for x in range(9)]  # 0.0, 0.05, ..., 0.40
-    algorithms    = ["gair-ransac"]
+    outlier_fracs = [0.4]  # TEMP: testing only, restore to [round(x * 0.05, 2) for x in range(9)] for full sweep
+    algorithms    = ["vanilla", "lo-ransac", "gc-ransac", "gair-ransac"]
 
     pc_out_dir = OUT_DIR / pc_file.stem
     pc_out_dir.mkdir(parents=True, exist_ok=True)
@@ -342,7 +343,7 @@ def run_for_pc(pc_file: Path, rng: np.random.Generator):
             if not candidates:
                 continue
 
-            for method in ("exhaustive", "ransacov"):
+            for method in COVER_METHODS:
                 print(f"\n=== set-cover [{method}]  {algo} — {len(candidates)} candidates ===")
 
                 if method == "exhaustive":
@@ -381,16 +382,26 @@ def run_for_pc(pc_file: Path, rng: np.random.Generator):
                 cd_accuracy  = float(d_est_to_inp.mean())
                 hd           = max(d_inp_to_est.max(), d_est_to_inp.max())
 
+                full_inlier_mask = np.zeros(len(points), dtype=bool)
+                for m in selected_models:
+                    res = np.abs(superquadric_radial_residual(m, points))
+                    full_inlier_mask |= (res < cover_threshold)
+                true_inliers_correct  = int(full_inlier_mask[:n_clean].sum())
+                true_outliers_correct = int((~full_inlier_mask[n_clean:]).sum())
+                classification_rate   = (true_inliers_correct + true_outliers_correct) / len(points)
+
                 print(
                     f"  {algo} [{method}] | k={len(selected_models)}"
                     f"  n_covered={n_covered}  n_evals={n_evals}"
                     f"  CD={cd:.4f}  COV={cd_coverage:.4f}  ACC={cd_accuracy:.4f}  HD={hd:.4f}"
+                    f"  CLF={classification_rate:.3f}"
                 )
                 cover_results.append({
                     "algo": algo, "method": method, "outlier_frac": out_frac,
                     "k": len(selected_models), "n_covered": n_covered, "n_evals": n_evals,
                     "chamfer": round(cd, 6), "cd_coverage": round(cd_coverage, 6),
                     "cd_accuracy": round(cd_accuracy, 6), "hausdorff": round(hd, 6),
+                    "classification_rate": round(classification_rate, 6),
                     "n_candidates": len(candidates),
                 })
 
@@ -403,7 +414,8 @@ def run_for_pc(pc_file: Path, rng: np.random.Generator):
         with open(csv_cover, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=[
                 "algo", "method", "outlier_frac", "k", "n_covered", "n_evals",
-                "chamfer", "cd_coverage", "cd_accuracy", "hausdorff", "n_candidates",
+                "chamfer", "cd_coverage", "cd_accuracy", "hausdorff", "classification_rate",
+                "n_candidates",
             ])
             writer.writeheader()
             writer.writerows(cover_results)
@@ -412,7 +424,10 @@ def run_for_pc(pc_file: Path, rng: np.random.Generator):
 
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    pc_files = sorted(f for f in PC_DIR.iterdir() if not f.name.startswith("normals_"))
+    pc_files = sorted(
+        f for f in PC_DIR.iterdir()
+        if f.is_file() and not f.name.startswith("normals_") and not f.name.startswith(".")
+    )
     if not pc_files:
         print(f"No files found in {PC_DIR}")
         return
