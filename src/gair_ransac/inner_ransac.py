@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
+import time
 import numpy as np
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from scipy.optimize import least_squares
@@ -219,7 +220,11 @@ def inner_ransac(
     consensus_metric: str | None = None,
     n_iters: int = 50,
     random_seed: int | None = None,
+    deadline: float | None = None,
 ) -> InnerRansacResult:
+    """deadline: an absolute time.perf_counter() value. When set, the iteration loop below
+    stops immediately once it passes, returning whatever best result was found so far.
+    None (default) preserves normal, iteration-count-bounded behavior for run.py."""
     point_cloud = np.asarray(point_cloud, dtype=np.float64)
     refined_set_index = np.asarray(refined_set_index, dtype=np.int64)
     actual_set_index = None if actual_set_index is None else np.asarray(actual_set_index, dtype=np.int64)
@@ -245,6 +250,8 @@ def inner_ransac(
         )
     size_sample = min(np.size(refined_set_index), sample_size)
     for _ in range(n_iters):
+        if deadline is not None and time.perf_counter() >= deadline:
+            break
         sample_idx = rng.choice(refined_set_index, size=size_sample, replace=False)
         sampled_points = point_cloud[sample_idx]
         try:

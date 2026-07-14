@@ -1,0 +1,5 @@
+algo,method,outlier_frac,k,n_covered,n_evals,chamfer,cd_coverage,cd_accuracy,hausdorff,n_candidates
+vanilla,ransacov,0.0,1,988,16,0.140375,0.020996,0.119379,0.311425,16
+lo-ransac,ransacov,0.0,1,1003,15,0.129631,0.020756,0.108875,0.263844,15
+gc-ransac,ransacov,0.0,1,889,10,0.205503,0.17946,0.026043,0.830309,10
+gair-ransac,ransacov,0.0,1,874,12,0.199557,0.183794,0.015763,0.838429,12

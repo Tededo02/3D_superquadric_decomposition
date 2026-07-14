@@ -1,4 +1,5 @@
 from typing import Optional
+import time
 import numpy as np
 
 from src.superquadrics.superquadric_param import SuperQuadricParams
@@ -92,7 +93,12 @@ def gair_ransac(
     random_seed: int | None = None,
     min_coverage: float = 0.0,
     use_normal_coherence: bool | None = None,
+    deadline: float | None = None,
 ) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None, int]:
+    """deadline: an absolute time.perf_counter() value. When set, the per-model iteration
+    loop, the graph-cut local-optimization loop, and the inner_ransac refinement step all
+    stop immediately once it passes, returning whatever best result was found so far.
+    None (default) preserves normal, iteration-count-bounded behavior for run.py."""
     total_best_mss_used: FloatArray | None = None
     total_local_opts: int = 0
 
@@ -115,6 +121,8 @@ def gair_ransac(
     inliers_set: list[BoolArray] = []
 
     for k in range(max_models):
+        if deadline is not None and time.perf_counter() >= deadline:
+            break
         if remaining_indices.size < max(sample_size, min_inliers):
             break
 
@@ -129,6 +137,8 @@ def gair_ransac(
         best_mss_used: FloatArray | None = None
 
         for j in range(max_iterations):
+            if deadline is not None and time.perf_counter() >= deadline:
+                break
             M_j = np.asarray(
                 adaptive_local_fps_mss(
                     current_point_cloud,
@@ -167,6 +177,9 @@ def gair_ransac(
             local_iteration: int                = 0
 
             while not terminate:
+                if deadline is not None and time.perf_counter() >= deadline:
+                    terminate = True
+                    continue
                 total_local_opts += 1
                 refined_inliers: BoolArray = np.asarray(
                     gair(
@@ -198,6 +211,7 @@ def gair_ransac(
                     consensus_metric=consensus_metric,
                     n_iters=inner_iterations,
                     random_seed=int(rng.integers(0, np.iinfo(np.int32).max)),
+                    deadline=deadline,
                 )
                 if inner_result.best_inlier_count <= 0:
                     terminate = True

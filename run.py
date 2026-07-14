@@ -25,7 +25,7 @@ from src.superquadrics import superquadric_sampling as samp
 from src.visualizations import plot as vis
 
 # ── config ────────────────────────────────────────────────────────────────────
-VISUALIZE    = False   # set to False to skip visualization and run headlessly
+VISUALIZE    = True   # set to False to skip visualization and run headlessly
 PC_DIR       = ROOT / "data" / "point_clouds"
 THRESHOLD    = 0.9
 GRAPH_RADIUS = 0.1
@@ -258,7 +258,7 @@ def run_for_pc(pc_file: Path, rng: np.random.Generator):
     print(f"  {n_clean} points loaded  |  config: {pc_cfg}")
 
     trial_seeds   = [int(rng.integers(0, 2**31)) for _ in range(N_TRIALS)]
-    outlier_fracs = [0.4]  # TEMP: testing only, restore to [round(x * 0.05, 2) for x in range(9)] for full sweep
+    outlier_fracs = [0.01]  # TEMP: testing only, restore to [round(x * 0.05, 2) for x in range(9)] for full sweep
     algorithms    = ["vanilla", "lo-ransac", "gc-ransac", "gair-ransac"]
 
     pc_out_dir = OUT_DIR / pc_file.stem
