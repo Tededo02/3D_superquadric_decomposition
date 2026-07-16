@@ -156,10 +156,27 @@ def save_point_cloud_inlier_model_view(
     return image_path
 
 
+def show_point_cloud_only(points: np.ndarray, point_size: int = 8, camera_position: list | None = None) -> list:
+    """Show the raw point cloud alone, all points black. Returns the camera position the
+    window was closed at, so a following show_mesh_and_points call can pick up from there."""
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+
+    pl = pv.Plotter()
+    pl.set_background("white")
+    pl.add_points(points, render_points_as_spheres=True, point_size=point_size, color="black")
+    pl.enable_eye_dome_lighting()
+    pl.camera_position = camera_position if camera_position is not None else DEFAULT_CAMERA_POSITION
+
+    pl.show()
+    return pl.camera_position
+
+
 def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bounds=True,colors: np.ndarray = None, inlier_mask: np.ndarray = None,mss_used: np.ndarray = None,
         models=None,
-        treshold=0.1
-    ) -> None:
+        treshold=0.1,
+        binary: bool = False,
+        camera_position: list | None = None,
+    ) -> list:
 
     # --- plotter ---
     pl = pv.Plotter()
@@ -171,7 +188,6 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
     error_inlier = None
     remaining_mask = None
     cloud_point_size = max(point_size * 2, 12)
-    mss_point_size = max(point_size * 5, 18)
 
     if models and points is not None:
         error_inlier = np.full(points.shape[0], np.inf, dtype=np.float64)
@@ -201,7 +217,7 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
     n_points_total = 0
     if points is not None:
         n_points_total = points.shape[0] # total number of points across all meshes
-        has_residual_colormap = error_inlier is not None and np.isfinite(error_inlier).any()
+        has_residual_colormap = (not binary) and error_inlier is not None and np.isfinite(error_inlier).any()
         if has_residual_colormap:
             finite_error = error_inlier[np.isfinite(error_inlier)]
             color_max = float(np.percentile(finite_error, 90))
@@ -250,20 +266,17 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
                     pl.add_points(points[~mask], render_points_as_spheres=True, point_size=cloud_point_size, color="#ff1744", opacity=0.8)
             else:
                 pl.add_points(points, render_points_as_spheres=True, point_size=cloud_point_size, color="#1565c0")
-
-        if mss_used is not None:
-            mss_points = np.asarray(mss_used, dtype=np.float64).reshape(-1, 3)
-            pl.add_points(mss_points, render_points_as_spheres=True, point_size=mss_point_size, color="violet")
     pl.enable_eye_dome_lighting()
 
-    # fixed camera angle (same every run)
-    pl.camera_position = DEFAULT_CAMERA_POSITION
+    pl.camera_position = camera_position if camera_position is not None else DEFAULT_CAMERA_POSITION
 
     pl.show()
+    last_camera_position = pl.camera_position
 
     mesh_only_plotter = pv.Plotter()
     mesh_only_plotter.set_background("white")
     _add_meshes_to_plotter(mesh_only_plotter, meshes, colors=colors, opacity=0.65)
     mesh_only_plotter.enable_eye_dome_lighting()
-    mesh_only_plotter.camera_position = DEFAULT_CAMERA_POSITION
+    mesh_only_plotter.camera_position = last_camera_position
     mesh_only_plotter.show()
+    return mesh_only_plotter.camera_position
