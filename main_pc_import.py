@@ -9,6 +9,7 @@ from src.superquadrics import superquadric_mesh as supmesh
 from src.visualizations import plot as vis
 from src.superquadrics import superquadric_sampling as samp
 from src.gair_ransac.inner_ransac import inner_ransac, fit_superquadric_ls
+from src.gair_ransac.energy_strategies import GcRansacEnergy
 from src.gair_ransac.ransac import ransac
 from point_cloud_utils import chamfer_distance
 from src.gair_ransac.gair_ransac import gair_ransac
@@ -200,7 +201,7 @@ def create_and_estimate_supq(
     elif algorithm in ("gair-ransac", "gc-ransac"):
         models, inliers_masks, total_best_mss_used, _ = gair_ransac(
             sampled_points,
-            normals,
+            normals if algorithm == "gair-ransac" else None,
             threshold=effective_threshold,
             max_models=max_models,
             max_iterations=40,
@@ -210,7 +211,9 @@ def create_and_estimate_supq(
             random_seed=run_seeds.algorithm,
             sample_size=SAMPLE_SIZE,
             min_inliers=MIN_INLIERS,
-
+            energy_strategy=(
+                GcRansacEnergy() if algorithm == "gc-ransac" else None
+            ),
         )
         if not models:
             raise RuntimeError("gair_ransac did not return any model")

@@ -4,6 +4,7 @@ import numpy as np
 
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from .consensus import compute_consensus, expanded_removal_mask
+from .energy_strategies import GairEnergyStrategy, OldPaperGairEnergy
 from .inner_ransac import inner_ransac, fit_superquadric_ls, InnerRansacResult
 from .gair import gair
 from .initgraph import build_knn_graph
@@ -93,6 +94,7 @@ def gair_ransac(
     random_seed: int | None = None,
     min_coverage: float = 0.0,
     use_normal_coherence: bool | None = None,
+    energy_strategy: GairEnergyStrategy | None = None,
     deadline: float | None = None,
 ) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None, int]:
     """deadline: an absolute time.perf_counter() value. When set, the per-model iteration
@@ -101,6 +103,8 @@ def gair_ransac(
     None (default) preserves normal, iteration-count-bounded behavior for run.py."""
     total_best_mss_used: FloatArray | None = None
     total_local_opts: int = 0
+    if energy_strategy is None:
+        energy_strategy = OldPaperGairEnergy()
 
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     if use_normal_coherence is None:
@@ -189,8 +193,7 @@ def gair_ransac(
                         model=current_model,
                         eps=threshold,
                         error_metric=consensus_metric,
-                        use_normal_coherence=use_normal_coherence,
-                        use_model_normal_agreement=use_normal_coherence,
+                        energy_strategy=energy_strategy,
                     ),
                     dtype=bool,
                 )
@@ -301,7 +304,6 @@ def gair_ransac(
             threshold,
             factor=1.0,
             error_metric=consensus_metric,
-            normals=V if use_normal_coherence else None,
         )
         remaining_indices = remaining_indices[~remove_mask]
 

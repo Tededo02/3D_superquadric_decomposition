@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 
 from point_cloud_utils import chamfer_distance
 from scipy.spatial import cKDTree
+from src.gair_ransac.energy_strategies import GcRansacEnergy
 from src.gair_ransac.ransacov import ransacov
 from src.superquadrics.superquadric_residual import superquadric_radial_residual
 from src.gair_ransac.gair_ransac import gair_ransac
@@ -25,7 +26,7 @@ from src.superquadrics import superquadric_sampling as samp
 from src.visualizations import plot as vis
 
 # ── config ────────────────────────────────────────────────────────────────────
-VISUALIZE    = True   # set to False to skip visualization and run headlessly
+VISUALIZE    = False   # set to False to skip visualization and run headlessly
 PC_DIR       = ROOT / "data" / "point_clouds"
 THRESHOLD    = 0.9
 GRAPH_RADIUS = 0.1
@@ -189,6 +190,9 @@ def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int, p
             sample_size=pc_cfg.get("mss_sample_size", 20),
             m_neighbors=pc_cfg.get("m_neighbors", 6),
             min_inliers=20,
+            energy_strategy=(
+                GcRansacEnergy() if algorithm == "gc-ransac" else None
+            ),
         )
     runtime = time.perf_counter() - t0
 

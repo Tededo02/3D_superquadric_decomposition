@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 
 from point_cloud_utils import chamfer_distance
 from scipy.spatial import cKDTree
+from src.gair_ransac.energy_strategies import GcRansacEnergy
 from src.gair_ransac.gair_ransac import gair_ransac
 from src.superquadrics import superquadric_mesh as supmesh
 from src.superquadrics import superquadric_sampling as samp
@@ -47,14 +48,17 @@ def load_point_cloud(path: Path):
 def run_one(points, normals, algorithm: str, seed: int):
     t0 = time.perf_counter()
     use_normal_coherence = (algorithm == "gair-ransac")
-    models, inliers_masks, _ = gair_ransac(
+    models, inliers_masks, _, _ = gair_ransac(
         points,
-        normals,
+        normals if algorithm == "gair-ransac" else None,
         threshold=THRESHOLD,
         max_models=MAX_MODELS,
         max_iterations=MAX_ITER,
         inner_iterations=INNER_ITER,
         use_normal_coherence=use_normal_coherence,
+        energy_strategy=(
+            GcRansacEnergy() if algorithm == "gc-ransac" else None
+        ),
         min_coverage=0.4,
         random_seed=seed,
     )

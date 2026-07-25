@@ -1,0 +1,3 @@
+energy,unary,pairwise,chamfer_gt_to_reconstruction,chamfer_reconstruction_to_gt,chamfer_total,misclassification_error,model_count,local_optimization_iterations
+FullGairEnergy,ResidualModelNormalUnaryEnergy,NormalCoherencePairwiseEnergy,0.3842467157881081,0.12186376487615565,0.5061104806642638,0.7636969696969697,,
+FullGairEnergy,ResidualModelNormalUnaryEnergy,NormalCoherencePairwiseEnergy,0.3842467157881081,0.12186376487615565,0.5061104806642638,0.7636969696969697,2,21

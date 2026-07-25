@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 
 from point_cloud_utils import chamfer_distance
 from scipy.spatial import cKDTree
+from src.gair_ransac.energy_strategies import GcRansacEnergy
 from src.gair_ransac.ransacov import ransacov
 from src.superquadrics.superquadric_residual import superquadric_radial_residual
 from src.gair_ransac.gair_ransac import gair_ransac
@@ -230,6 +231,9 @@ def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int,
                 random_seed=round_seed,
                 sample_size=pc_cfg.get("mss_sample_size", 50),
                 deadline=deadline,
+                energy_strategy=(
+                    GcRansacEnergy() if algorithm == "gc-ransac" else None
+                ),
             )
         n_local_opts += round_lo
 

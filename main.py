@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from point_cloud_utils import chamfer_distance
+from src.gair_ransac.energy_strategies import GcRansacEnergy
 from src.gair_ransac.gair_ransac import gair_ransac
 from src.superquadrics import superquadric_mesh as supmesh
 from src.superquadrics import superquadric_sampling as samp
@@ -66,7 +67,7 @@ def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int):
     t0 = time.perf_counter()
     models, inliers_masks, _, _ = gair_ransac(
         points,
-        normals,
+        normals if algorithm == "gair-ransac" else None,
         threshold=THRESHOLD,
         max_models=len(GT_PARAMS),
         max_iterations=MAX_ITER,
@@ -76,6 +77,9 @@ def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int):
         m_neighbors=6,
         random_seed=seed,
         use_normal_coherence=(algorithm == "gair-ransac"),
+        energy_strategy=(
+            GcRansacEnergy() if algorithm == "gc-ransac" else None
+        ),
     )
     runtime = time.perf_counter() - t0
 
