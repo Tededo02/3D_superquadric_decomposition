@@ -28,14 +28,14 @@ from src.superquadrics import superquadric_mesh as supmesh
 from src.superquadrics import superquadric_sampling as samp
 
 # ── config ────────────────────────────────────────────────────────────────────
-TIME_BUDGET_S     = 120.0  # seconds each algorithm gets per trial
+TIME_BUDGET_S     = 60.0  # wall-clock seconds each algorithm gets per trial
 PC_DIR            = ROOT / "data" / "point_clouds"
 THRESHOLD         = 0.9
 GRAPH_RADIUS      = 0.1
 MAX_MODELS        = 10
-PER_MODEL_BUDGET  = TIME_BUDGET_S / MAX_MODELS  # seconds per model slot
-INNER_ITER        = 25
-N_TRIALS       = 16
+MAX_ITER          = 50  # iterations per single-model search attempt, same as run.py
+INNER_ITER        = 40
+N_TRIALS       = 5
 K              = 1
 EVAL_SEED      = 42
 OUT_DIR        = ROOT / "data" / "results_budget"
@@ -70,6 +70,11 @@ def _drop_background_color(points: np.ndarray, colors_rgba: np.ndarray):
     if bg_count / len(points) <= 0.5:
         return points, np.ones(len(points), dtype=bool)
     mask = np.array([tuple(c) != bg_color for c in rgb])
+    if not mask.any():
+        # Every point shares the "background" color (e.g. a uniformly-colored/synthetic
+        # point cloud with no real background to strip) -- removing it all would leave
+        # nothing, so keep the whole cloud instead.
+        return points, np.ones(len(points), dtype=bool)
     return points[mask], mask
 
 
@@ -157,68 +162,92 @@ def exhaustive_best_cover(candidates, points, k_max):
     return list(overall_best_combo), total_evals
 
 
-def _find_max_iters(algorithm: str, points: np.ndarray, normals: np.ndarray,
-                    pc_cfg: dict, seed: int) -> int:
-    """Search for the iteration count whose actual runtime is closest to PER_MODEL_BUDGET."""
-    threshold = pc_cfg.get("threshold", THRESHOLD)
-
-    def _run(n, s) -> float:
-        t0 = time.perf_counter()
-        if algorithm in ("vanilla", "lo-ransac"):
-            ransac(points, threshold=threshold, max_models=1, max_iterations=n,
-                   inner_iterations=INNER_ITER, random_seed=s,
-                   local_optimization=(algorithm == "lo-ransac"))
-        else:
-            gair_ransac(points, normals if algorithm == "gair-ransac" else None,
-                        threshold=threshold, max_models=1, max_iterations=n,
-                        inner_iterations=INNER_ITER, radius=GRAPH_RADIUS, min_coverage=0.4,
-                        random_seed=s, sample_size=pc_cfg.get("mss_sample_size", 50))
-        return time.perf_counter() - t0
-
-    _run(1, seed ^ 0xDEAD)   # warm-up
-
-    best_n, best_diff = 1, float("inf")
-    n = 1
-    while True:
-        t = _run(n, seed)
-        diff = abs(t - PER_MODEL_BUDGET)
-        if diff < best_diff:
-            best_diff, best_n = diff, n
-        if t >= PER_MODEL_BUDGET:
-            break
-        n_next = max(n + 1, round(n * PER_MODEL_BUDGET / t))
-        n = n_next
-    return best_n
+def _is_duplicate_model(global_mask: np.ndarray, existing_masks: list, overlap_threshold: float = 0.5) -> bool:
+    """True if global_mask substantially overlaps (Jaccard) an already-found model's
+    inlier mask -- keeps the time-budget loop from re-appending the same rediscovered
+    shape every time it re-scans the point cloud after exhausting the real ones."""
+    for existing in existing_masks:
+        union = int(np.count_nonzero(global_mask | existing))
+        if union == 0:
+            continue
+        inter = int(np.count_nonzero(global_mask & existing))
+        if inter / union >= overlap_threshold:
+            return True
+    return False
 
 
 def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int,
-            pc_cfg: dict, max_iter: int):
+            pc_cfg: dict, time_budget_s: float = TIME_BUDGET_S):
+    """Repeatedly searches for one model at a time -- max_iterations=MAX_ITER,
+    inner_iterations=INNER_ITER, exactly as run.py uses them, no calibration and no
+    per-model time slicing -- removing each found model's inliers from the pool (and
+    resetting to the full point cloud once it runs dry) and keeps going until
+    time_budget_s elapses. Every single-model search gets the full MAX_ITER/INNER_ITER
+    allowance; only the *number* of searches performed is governed by the wall clock, so
+    the whole run uses the entire budget rather than a calibrated slice of it."""
     threshold = pc_cfg.get("threshold", THRESHOLD)
+    rng = np.random.default_rng(seed)
+    n_points = len(points)
 
     t0 = time.perf_counter()
-    if algorithm in ("vanilla", "lo-ransac"):
-        models, inliers_masks, n_local_opts = ransac(
-            points,
-            threshold=threshold,
-            max_models=MAX_MODELS,
-            max_iterations=max_iter,
-            inner_iterations=INNER_ITER,
-            random_seed=seed,
-            local_optimization=(algorithm == "lo-ransac"),
-        )
-    else:
-        models, inliers_masks, _mss_used, n_local_opts = gair_ransac(
-            points,
-            normals if algorithm == "gair-ransac" else None,
-            threshold=threshold,
-            max_models=MAX_MODELS,
-            max_iterations=max_iter,
-            inner_iterations=INNER_ITER,
-            radius=GRAPH_RADIUS,
-            min_coverage=0.4,
-            random_seed=seed,
-            sample_size=pc_cfg.get("mss_sample_size", 50),
-        )
+    deadline = t0 + time_budget_s
+
+    models: list = []
+    inliers_masks: list = []
+    n_local_opts = 0
+
+    remaining_indices = np.arange(n_points, dtype=np.int64)
+
+    while time.perf_counter() < deadline and len(models) < MAX_MODELS:
+        if remaining_indices.size < 11:
+            remaining_indices = np.arange(n_points, dtype=np.int64)
+
+        sub_points  = points[remaining_indices]
+        sub_normals = normals[remaining_indices] if normals is not None else None
+        round_seed  = int(rng.integers(0, np.iinfo(np.int32).max))
+
+        if algorithm in ("vanilla", "lo-ransac"):
+            round_models, round_masks, round_lo = ransac(
+                sub_points,
+                threshold=threshold,
+                max_models=1,
+                max_iterations=MAX_ITER,
+                inner_iterations=INNER_ITER,
+                random_seed=round_seed,
+                local_optimization=(algorithm == "lo-ransac"),
+                deadline=deadline,
+            )
+        else:
+            round_models, round_masks, _mss_used, round_lo = gair_ransac(
+                sub_points,
+                sub_normals if algorithm == "gair-ransac" else None,
+                threshold=threshold,
+                max_models=1,
+                max_iterations=MAX_ITER,
+                inner_iterations=INNER_ITER,
+                radius=GRAPH_RADIUS,
+                min_coverage=0.4,
+                random_seed=round_seed,
+                sample_size=pc_cfg.get("mss_sample_size", 50),
+                deadline=deadline,
+            )
+        n_local_opts += round_lo
+
+        if not round_models:
+            remaining_indices = np.arange(n_points, dtype=np.int64)
+            continue
+
+        model      = round_models[0]
+        local_mask = round_masks[0]
+        global_mask = np.zeros(n_points, dtype=bool)
+        global_mask[remaining_indices[local_mask]] = True
+
+        if not _is_duplicate_model(global_mask, inliers_masks):
+            models.append(model)
+            inliers_masks.append(global_mask)
+
+        remaining_indices = remaining_indices[~local_mask]
+
     runtime = time.perf_counter() - t0
 
     if not models:
@@ -273,7 +302,7 @@ def run_for_pc(pc_file: Path, rng: np.random.Generator):
     print(f"  {n_clean} points  |  config: {pc_cfg}")
 
     trial_seeds   = [int(rng.integers(0, 2**31)) for _ in range(N_TRIALS)]
-    outlier_fracs = [round(x * 0.05, 2) for x in range(9)]
+    outlier_fracs = [0.0, 0.1, 0.2, 0.3, 0.4]
     algorithms    = ["gair-ransac", "gc-ransac", "lo-ransac", "vanilla"]
 
     pc_out_dir = OUT_DIR / pc_file.stem
@@ -295,17 +324,11 @@ def run_for_pc(pc_file: Path, rng: np.random.Generator):
         all_results    = []
         all_candidates = {algo: [] for algo in algorithms}
 
-        print("  calibrating...")
-        max_iters = {}
-        for algo in algorithms:
-            max_iters[algo] = _find_max_iters(algo, points_c, normals_c, pc_cfg, seed=EVAL_SEED)
-            print(f"    [{algo}] → {max_iters[algo]} iters/slot")
-
         for trial in range(N_TRIALS):
             for algo in algorithms:
                 seed = trial_seeds[trial]
-                print(f"\n  --- trial {trial} | {algo} | seed={seed} ---")
-                result = run_one(points_c, normals_c, clean_points, n_clean, algo, seed, pc_cfg, max_iters[algo])
+                print(f"\n  --- trial {trial} | {algo} | seed={seed} | budget={TIME_BUDGET_S}s ---")
+                result = run_one(points_c, normals_c, clean_points, n_clean, algo, seed, pc_cfg, TIME_BUDGET_S)
                 if result is None:
                     print(f"  trial {trial} {algo}: no model found")
                     continue

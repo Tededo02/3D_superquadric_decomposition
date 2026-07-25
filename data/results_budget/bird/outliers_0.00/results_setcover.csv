@@ -1,0 +1,9 @@
+algo,method,outlier_frac,budget_s,k,n_covered,n_evals,chamfer,cd_coverage,cd_accuracy,hausdorff,n_candidates
+gair-ransac,exhaustive,0.0,60.0,1,623,11,0.101359,0.06286,0.038499,0.291968,11
+gair-ransac,ransacov,0.0,60.0,1,642,11,0.12263,0.078616,0.044014,0.411929,11
+gc-ransac,exhaustive,0.0,60.0,1,618,5,0.101477,0.060684,0.040793,0.284234,5
+gc-ransac,ransacov,0.0,60.0,1,633,5,0.109498,0.059744,0.049754,0.279092,5
+lo-ransac,exhaustive,0.0,60.0,1,615,21,0.100024,0.062001,0.038023,0.292384,21
+lo-ransac,ransacov,0.0,60.0,1,636,21,0.114093,0.062913,0.05118,0.286346,21
+vanilla,exhaustive,0.0,60.0,1,590,36,0.099195,0.061328,0.037866,0.273542,36
+vanilla,ransacov,0.0,60.0,1,608,36,0.102831,0.062385,0.040447,0.328518,36

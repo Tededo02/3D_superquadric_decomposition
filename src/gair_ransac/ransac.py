@@ -1,4 +1,5 @@
 from typing import Optional
+import time
 import numpy as np
 
 from src.superquadrics.superquadric_param import SuperQuadricParams
@@ -27,7 +28,12 @@ def ransac(
     inner_iterations: int = 50,
     random_seed: int | None = None,
     local_optimization: bool = True,
+    deadline: float | None = None,
 ) -> tuple[list[SuperQuadricParams], list[BoolArray]]:
+    """deadline: an absolute time.perf_counter() value. When set, both the per-model
+    iteration loop and the inner_ransac local-optimization step stop immediately once it
+    passes, returning whatever best result was found so far. None (default) preserves
+    normal, iteration-count-bounded behavior for run.py."""
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     rng = np.random.default_rng(random_seed)
     n_points: int = point_cloud.shape[0]
@@ -37,6 +43,8 @@ def ransac(
     total_local_opts: int = 0
 
     for _ in range(max_models):
+        if deadline is not None and time.perf_counter() >= deadline:
+            break
         if remaining_indices.size < max(sample_size, min_inliers):
             break
 
@@ -45,6 +53,8 @@ def ransac(
         best_inliers: BoolArray = np.zeros(current_point_cloud.shape[0], dtype=bool)
 
         for _ in range(max_iterations):
+            if deadline is not None and time.perf_counter() >= deadline:
+                break
             idx = rng.choice(current_point_cloud.shape[0], size=min(sample_size, current_point_cloud.shape[0]), replace=False)
             sample_pts: FloatArray = current_point_cloud[idx]
 
@@ -81,6 +91,7 @@ def ransac(
                         consensus_metric=consensus_metric,
                         n_iters=inner_iterations,
                         random_seed=int(rng.integers(0, np.iinfo(np.int32).max)),
+                        deadline=deadline,
                     )
                     if inner_result.best_inlier_count > 0:
                         current_inliers = np.asarray(inner_result.best_inliers_mask, dtype=bool)
