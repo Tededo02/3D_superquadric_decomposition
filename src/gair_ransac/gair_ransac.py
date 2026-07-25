@@ -4,7 +4,7 @@ import numpy as np
 
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from .consensus import compute_consensus, expanded_removal_mask
-from .energy_strategies import GairEnergyStrategy, OldPaperGairEnergy
+from .energy_strategies import FullGairEnergy, GairEnergyStrategy
 from .inner_ransac import inner_ransac, fit_superquadric_ls, InnerRansacResult
 from .gair import gair
 from .initgraph import build_knn_graph
@@ -104,7 +104,7 @@ def gair_ransac(
     total_best_mss_used: FloatArray | None = None
     total_local_opts: int = 0
     if energy_strategy is None:
-        energy_strategy = OldPaperGairEnergy()
+        energy_strategy = FullGairEnergy()
 
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     if use_normal_coherence is None:
@@ -304,6 +304,7 @@ def gair_ransac(
             threshold,
             factor=1.0,
             error_metric=consensus_metric,
+            normals=V if use_normal_coherence else None,
         )
         remaining_indices = remaining_indices[~remove_mask]
 

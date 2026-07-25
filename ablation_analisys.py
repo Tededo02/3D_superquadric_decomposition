@@ -1,3 +1,12 @@
+# FullGairEnergy, with labels y_i in {outlier, inlier}:
+# E(y) = sum_i U_i(y_i) + sum_(i,j) w_ij [y_i != y_j].
+# U_i(inlier) = clip(d_i / eps, 0, 1) + clip((1 - <n_i, n_model_i>) / 2, 0, 1).
+# U_i(outlier) = 1 + 1/2 sum_j p_ij, where p_ij = c_ij(1 - (rho_i + rho_j) / 2).
+# c_ij = (1 + <n_i, n_j>) / 2, rho_i = clip(d_i / (outlier_scale eps), 0, 1).
+# w_ij = c_ij - p_ij / 2.
+# ConstantCoherenceGairEnergy uses the same formula and unary term, but fixes c_ij = 1.
+# OnlyUnaryGairStrategy uses the model-normal unary term and the GC-RANSAC pairwise term.
+
 import csv
 from pathlib import Path
 
@@ -7,8 +16,10 @@ from scipy.spatial import cKDTree
 
 from src.gair_ransac.energy_strategies import (
     ComposedGairEnergy,
+    ConstantCoherenceGairEnergy,
     FullGairEnergy,
     GairEnergyStrategy,
+    OnlyUnaryGairStrategy,
 )
 from src.gair_ransac.gair_ransac import gair_ransac
 from src.superquadrics import superquadric_mesh as superquadric_mesh
@@ -23,6 +34,8 @@ RESULTS_CSV_PATH = (
 
 ENERGY_STRATEGIES: tuple[GairEnergyStrategy, ...] = (
     FullGairEnergy(),
+    ConstantCoherenceGairEnergy(),
+    OnlyUnaryGairStrategy(),
 )
 SAMPLED_POINT_COUNT = 30000
 EVALUATION_POINT_COUNT = 30000

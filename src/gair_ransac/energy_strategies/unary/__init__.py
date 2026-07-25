@@ -1,3 +1,5 @@
+# Unary terms contribute sum_i U_i(y_i) to the complete graph-cut energy.
+
 from .residual_model_normal_unary_energy import (
     ResidualModelNormalUnaryEnergy,
 )
@@ -12,4 +14,3 @@ __all__ = [
     "UnaryCosts",
     "UnaryEnergyTerm",
 ]
-

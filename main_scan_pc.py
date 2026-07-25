@@ -6,6 +6,7 @@ import numpy as np
 import trimesh
 from scipy.spatial import cKDTree
 
+from src.gair_ransac.energy_strategies import FullGairEnergy
 from src.gair_ransac.gair_ransac import gair_ransac
 from src.gair_ransac.normals_estimation import estimate_normals_open3d_consistent
 from src.superquadrics import superquadric_mesh as supmesh
@@ -203,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
         normals=normals,
         random_seed=args.seed,
         min_coverage=MIN_COVERAGE,
+        energy_strategy=FullGairEnergy(),
     )
     if not models:
         raise RuntimeError("gair_ransac did not return any model")

@@ -1,3 +1,7 @@
+# For c_ij > coherence_min, C_i = 1/2 sum_j p_ij and V_ij = w_ij [y_i != y_j].
+# c_ij = (1 + <n_i, n_j>) / 2, p_ij = c_ij(1 - (rho_i + rho_j) / 2).
+# rho_i = clip(d_i / (outlier_scale eps), 0, 1), w_ij = c_ij - p_ij / 2.
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -5,10 +9,11 @@ import numpy as np
 from ..context import EnergyContext
 from .pairwise_costs import PairwiseCosts
 from .pairwise_energy_term import PairwiseEnergyTerm
+from .residual_aware_pairwise import build_residual_aware_pairwise_costs
 
 
-COHERENCE_MIN = 0.1
-OUTLIER_SCALE = 2.5
+COHERENCE_MIN = 0.9
+OUTLIER_SCALE = 3.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,11 +41,6 @@ class NormalCoherencePairwiseEnergy(PairwiseEnergyTerm):
         if not context.edges.size:
             return PairwiseCosts.empty(point_count)
 
-        normalized_residual = np.clip(
-            residual / (self.outlier_scale * context.eps + 1e-12),
-            0.0,
-            1.0,
-        )
         edge_sources = context.edges[:, 0]
         edge_targets = context.edges[:, 1]
         coherence = 0.5 * (
@@ -60,27 +60,12 @@ class NormalCoherencePairwiseEnergy(PairwiseEnergyTerm):
         if not edge_sources.size:
             return PairwiseCosts.empty(point_count)
 
-        outlier_pair_cost = coherence * (
-            1.0
-            - 0.5
-            * (
-                normalized_residual[edge_sources]
-                + normalized_residual[edge_targets]
-            )
-        )
-        np.maximum(outlier_pair_cost, 0.0, out=outlier_pair_cost)
-
-        edge_weights = coherence - 0.5 * outlier_pair_cost
-        np.maximum(edge_weights, 0.0, out=edge_weights)
-
-        outlier_correction = np.zeros(point_count, dtype=np.float64)
-        endpoint_correction = 0.5 * outlier_pair_cost
-        np.add.at(outlier_correction, edge_sources, endpoint_correction)
-        np.add.at(outlier_correction, edge_targets, endpoint_correction)
-
-        return PairwiseCosts(
+        return build_residual_aware_pairwise_costs(
+            point_count=point_count,
+            residual=residual,
+            eps=context.eps,
+            outlier_scale=self.outlier_scale,
             edge_sources=edge_sources,
             edge_targets=edge_targets,
-            edge_weights=edge_weights,
-            outlier_correction=outlier_correction,
+            coherence=coherence,
         )

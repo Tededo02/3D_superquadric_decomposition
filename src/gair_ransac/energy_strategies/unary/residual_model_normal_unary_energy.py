@@ -1,3 +1,6 @@
+# U_i(inlier) = clip(d_i / eps, 0, 1) + clip((1 - <n_i, n_model_i>) / 2, 0, 1).
+# U_i(outlier) = 1.
+
 import numpy as np
 
 from ...consensus import normal_alignment_score

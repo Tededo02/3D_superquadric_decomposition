@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 
 from point_cloud_utils import chamfer_distance
 from scipy.spatial import cKDTree
-from src.gair_ransac.energy_strategies import GcRansacEnergy
+from src.gair_ransac.energy_strategies import FullGairEnergy, GcRansacEnergy
 from src.gair_ransac.ransacov import ransacov
 from src.superquadrics.superquadric_residual import superquadric_radial_residual
 from src.gair_ransac.gair_ransac import gair_ransac
@@ -218,7 +218,7 @@ def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int,
                 local_optimization=(algorithm == "lo-ransac"),
                 deadline=deadline,
             )
-        else:
+        elif algorithm in ("gair-ransac", "gc-ransac"):
             round_models, round_masks, _mss_used, round_lo = gair_ransac(
                 sub_points,
                 sub_normals if algorithm == "gair-ransac" else None,
@@ -232,9 +232,13 @@ def run_one(points, normals, clean_points, n_clean, algorithm: str, seed: int,
                 sample_size=pc_cfg.get("mss_sample_size", 50),
                 deadline=deadline,
                 energy_strategy=(
-                    GcRansacEnergy() if algorithm == "gc-ransac" else None
+                    FullGairEnergy()
+                    if algorithm == "gair-ransac"
+                    else GcRansacEnergy()
                 ),
             )
+        else:
+            raise ValueError(f"Unsupported algorithm: {algorithm}")
         n_local_opts += round_lo
 
         if not round_models:

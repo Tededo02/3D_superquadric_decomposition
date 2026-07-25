@@ -1,3 +1,5 @@
+# Unary costs represent sum_i U_i(y_i), with one inlier and one outlier cost per point.
+
 from dataclasses import dataclass
 
 import numpy as np

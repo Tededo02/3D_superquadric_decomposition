@@ -9,7 +9,7 @@ from src.superquadrics import superquadric_mesh as supmesh
 from src.visualizations import plot as vis
 from src.superquadrics import superquadric_sampling as samp
 from src.gair_ransac.inner_ransac import inner_ransac, fit_superquadric_ls
-from src.gair_ransac.energy_strategies import GcRansacEnergy
+from src.gair_ransac.energy_strategies import FullGairEnergy, GcRansacEnergy
 from src.gair_ransac.ransac import ransac
 from point_cloud_utils import chamfer_distance
 from src.gair_ransac.gair_ransac import gair_ransac
@@ -212,7 +212,9 @@ def create_and_estimate_supq(
             sample_size=SAMPLE_SIZE,
             min_inliers=MIN_INLIERS,
             energy_strategy=(
-                GcRansacEnergy() if algorithm == "gc-ransac" else None
+                FullGairEnergy()
+                if algorithm == "gair-ransac"
+                else GcRansacEnergy()
             ),
         )
         if not models:

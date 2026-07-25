@@ -1,3 +1,5 @@
+# The context provides the points, graph, normals, model, and eps used to build E(y).
+
 from __future__ import annotations
 
 from dataclasses import dataclass

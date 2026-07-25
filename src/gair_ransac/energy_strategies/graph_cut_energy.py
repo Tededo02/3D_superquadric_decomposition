@@ -1,3 +1,6 @@
+# E(y) = sum_i U_i(y_i) + sum_(i,j) w_ij [y_i != y_j].
+# U_i is selected from inlier_cost or outlier_cost according to the binary label y_i.
+
 from dataclasses import dataclass
 
 import numpy as np

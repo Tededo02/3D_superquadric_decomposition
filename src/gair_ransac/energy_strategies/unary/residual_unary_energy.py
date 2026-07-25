@@ -1,3 +1,5 @@
+# U_i(inlier) = clip(d_i / eps, 0, 1), U_i(outlier) = 1.
+
 from dataclasses import dataclass
 
 import numpy as np

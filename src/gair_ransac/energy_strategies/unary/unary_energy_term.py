@@ -1,3 +1,5 @@
+# A unary term builds sum_i U_i(y_i) for the binary inlier/outlier labels.
+
 from abc import ABC, abstractmethod
 
 import numpy as np

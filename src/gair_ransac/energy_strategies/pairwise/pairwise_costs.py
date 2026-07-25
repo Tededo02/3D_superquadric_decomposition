@@ -1,3 +1,5 @@
+# Pairwise costs represent C_i [y_i = outlier] + sum_(i,j) w_ij [y_i != y_j].
+
 from dataclasses import dataclass
 
 import numpy as np

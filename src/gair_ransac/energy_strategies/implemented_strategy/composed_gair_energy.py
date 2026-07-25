@@ -1,3 +1,6 @@
+# E(y) = sum_i (U_i(y_i) + C_i [y_i = outlier]) + sum_(i,j) w_ij [y_i != y_j].
+# U is supplied by the unary term; C and w are supplied by the pairwise term.
+# costruisci energia come vuoi
 from dataclasses import dataclass
 
 from ...consensus import distance_err

@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.gair_ransac.energy_strategies import FullGairEnergy
 from src.gair_ransac.gair_ransac import gair_ransac
 from src.gair_ransac.vanilla_ransac import vanilla_ransac
 from src.superquadrics import superquadric_mesh as supmesh
@@ -129,6 +130,7 @@ def main():
         use_normal_coherence=True,
         min_coverage=0.4,
         random_seed=SEED,
+        energy_strategy=FullGairEnergy(),
     )
     if not models_after:
         print("  GAIR-RANSAC found no models — try adjusting SEED or MAX_ITER")

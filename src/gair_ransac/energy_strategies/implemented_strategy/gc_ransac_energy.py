@@ -1,3 +1,7 @@
+# E(y) = sum_i U_i(y_i) + 1/2 sum_(i,j) [y_i != y_j], with r_i = clip(d_i / eps, 0, 1).
+# U_i(inlier) = r_i + 1/2 sum_j ((r_i + r_j) / 2).
+# U_i(outlier) = 1 + 1/2 sum_j (1 - (r_i + r_j) / 2).
+# energia per gc_ransac
 from dataclasses import dataclass
 
 import numpy as np
@@ -7,18 +11,32 @@ from ..context import EnergyContext
 from ..gair_energy_strategy import GairEnergyStrategy
 from ..graph_cut_energy import GraphCutEnergy
 from ..unary.residual_unary_energy import ResidualUnaryEnergy
+from ..unary.unary_costs import UnaryCosts
 
 
 @dataclass(frozen=True, slots=True)
 class GcRansacEnergy(GairEnergyStrategy):
+    def _build_unary_costs(
+        self,
+        context: EnergyContext,
+        residual: np.ndarray,
+        residual_unary_costs: UnaryCosts,
+    ) -> UnaryCosts:
+        return residual_unary_costs
+
     def build(self, context: EnergyContext) -> GraphCutEnergy:
         residual = distance_err(
             context.model,
             context.points,
             error_metric=context.error_metric,
         )
-        unary_costs = ResidualUnaryEnergy().build(context, residual)
-        normalized_residual = unary_costs.inlier
+        residual_unary_costs = ResidualUnaryEnergy().build(context, residual)
+        unary_costs = self._build_unary_costs(
+            context,
+            residual,
+            residual_unary_costs,
+        )
+        normalized_residual = residual_unary_costs.inlier
         inlier_cost = unary_costs.inlier.copy()
         outlier_cost = unary_costs.outlier.copy()
         if not context.edges.size:
