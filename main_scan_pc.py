@@ -9,7 +9,7 @@ from scipy.spatial import cKDTree
 from src.gair_ransac.gair_ransac import gair_ransac
 from src.gair_ransac.normals_estimation import estimate_normals_open3d_consistent
 from src.superquadrics import superquadric_mesh as supmesh
-from src.visualizations import viz_rpc as vis
+from src.visualizations import plot as vis
 
 
 PC_NAME = "car_pc_resized_100000.ply"
@@ -18,18 +18,18 @@ ROOT = Path(__file__).resolve().parent
 PC_DIR = ROOT / "test_objects" / "real_pc"
 TEST_OBJECTS_DIR = ROOT / "test_objects"
 SUPPORTED_INPUT_EXTENSIONS = {".ply", ".stl"}
-K_NEIGHBORS = 80
+K_NEIGHBORS = 90
 THRESHOLD = 0.015 # if 0 use point spacing to compute effective threshold
 THRESHOLD_SPACING_FACTOR = 2.0
-M_NEIGHBORS = 11
-MAX_MODELS = 15
-MAX_ITERATIONS = 40
-INNER_ITERATIONS = 80
+M_NEIGHBORS = 10
+MAX_MODELS = 10
+MAX_ITERATIONS = 60
+INNER_ITERATIONS = 40
 SAMPLE_SIZE = 35
 MIN_INLIERS = 600
-MIN_COVERAGE = 0.14
+MIN_COVERAGE = 0.12
 MSS_MAX_POOL_FRACTION = 0.18
-RANDOM_SEED = 1234567
+RANDOM_SEED = 123
 MESH_SAMPLE_COUNT = 30000
 
 
@@ -221,16 +221,16 @@ def main(argv: list[str] | None = None) -> int:
     list_mesh = [supmesh.superquadric_mesh(model) for model in models]
     mesh_colors = [palette[i % len(palette)] for i in range(len(list_mesh))]
 
-    vis.show_rpc_models(
+    vis.show_mesh_and_points(
         list_mesh,
         pts=points,
         point_size=5,
+        show_bounds=True,
         colors=mesh_colors,
         inlier_mask=inlier_mask,
         mss_used=total_best_mss_used,
         models=models,
-        threshold=effective_threshold,
-        point_colors=point_colors,
+        treshold=effective_threshold,
     )
     return 0
 

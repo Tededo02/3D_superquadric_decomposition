@@ -228,3 +228,4 @@ im_obj/
 .vscode
 .DS_Store
 data/point_clouds/
+visualize_superquadric.py
