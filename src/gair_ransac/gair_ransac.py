@@ -8,7 +8,11 @@ from .energy_strategies import FullGairEnergy, GairEnergyStrategy
 from .inner_ransac import inner_ransac, fit_superquadric_ls, InnerRansacResult
 from .gair import gair
 from .initgraph import build_knn_graph
-from .mss import adaptive_local_fps_mss
+from .mss import (
+    AdaptiveLocalFpsSamplerContext,
+    adaptive_local_fps_mss,
+    build_adaptive_local_fps_sampler_context,
+)
 from numpy.typing import NDArray
 
 FloatArray = NDArray[np.float64]
@@ -139,10 +143,16 @@ def gair_ransac(
 
         edge: IntArray = _induced_subgraph_edges(full_edge, remaining_indices, n_points)
         best_mss_used: FloatArray | None = None
+        mss_sampler_context: AdaptiveLocalFpsSamplerContext | None = None
 
         for j in range(max_iterations):
             if deadline is not None and time.perf_counter() >= deadline:
                 break
+            if mss_sampler_context is None:
+                mss_sampler_context = build_adaptive_local_fps_sampler_context(
+                    current_point_cloud,
+                    V_mss,
+                )
             M_j = np.asarray(
                 adaptive_local_fps_mss(
                     current_point_cloud,
@@ -151,6 +161,7 @@ def gair_ransac(
                     initial_k=60,
                     candidate_multiplier=3,
                     rng=rng,
+                    sampler_context=mss_sampler_context,
                 ),
                 dtype=np.float64,
             )
@@ -283,7 +294,7 @@ def gair_ransac(
             inlier_pts      = current_point_cloud[best_inliers]
             tree_inliers    = _cKDTree(inlier_pts)
             dists, _        = tree_inliers.query(surface_samples, k=1)
-            coverage        = float((dists < threshold).mean())
+            coverage        = float((dists < 2*threshold).mean())
             if coverage < min_coverage:
                 continue
 
@@ -302,7 +313,7 @@ def gair_ransac(
             best_model,
             current_point_cloud,
             threshold,
-            factor=1.0,
+            factor=3.0,
             error_metric=consensus_metric,
             normals=V if use_normal_coherence else None,
         )

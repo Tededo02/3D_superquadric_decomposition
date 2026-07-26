@@ -101,7 +101,7 @@ def fit_superquadric_ls(
         min_axis_length,
         global_max_axis_length,
     )
-    exponent_min, exponent_max = 0.08, 4.0
+    exponent_min, exponent_max = 0.06, 4.5
     angle_min, angle_max = -np.pi, np.pi
     translation_margin = 0.25 * reference_diagonal
 

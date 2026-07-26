@@ -2,7 +2,7 @@ import numpy as np
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from src.superquadrics.superquadric_residual import superquadric_normal_world,superquadric_residual_vector
 
-DEFAULT_NORMAL_COS_THRESHOLD = 0.3
+DEFAULT_NORMAL_COS_THRESHOLD = 0.0
 
 
 def distance_err(

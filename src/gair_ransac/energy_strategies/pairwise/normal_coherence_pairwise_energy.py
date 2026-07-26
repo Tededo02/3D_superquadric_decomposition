@@ -13,7 +13,7 @@ from .residual_aware_pairwise import build_residual_aware_pairwise_costs
 
 
 COHERENCE_MIN = 0.9
-OUTLIER_SCALE = 3.0
+OUTLIER_SCALE = 2.5
 
 
 @dataclass(frozen=True, slots=True)
