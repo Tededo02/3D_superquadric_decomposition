@@ -6,31 +6,33 @@ import numpy as np
 import trimesh
 from scipy.spatial import cKDTree
 
-from src.gair_ransac.energy_strategies import FullGairEnergy
+from src.gair_ransac.energy_strategies import FullGairEnergy, GcRansacEnergy
 from src.gair_ransac.gair_ransac import gair_ransac
 from src.gair_ransac.normals_estimation import estimate_normals_open3d_consistent
 from src.superquadrics import superquadric_mesh as supmesh
 from src.visualizations import plot as vis
 
 
-PC_NAME = "car_pc_resized_100000.ply"
+PC_NAME = "etp_no_floor.ply"
 
+
+ALGORITHM_NAME = "gair"
 ROOT = Path(__file__).resolve().parent
 PC_DIR = ROOT / "test_objects" / "real_pc"
 TEST_OBJECTS_DIR = ROOT / "test_objects"
 SUPPORTED_INPUT_EXTENSIONS = {".ply", ".stl"}
 K_NEIGHBORS = 90
-THRESHOLD = 0.015 # if 0 use point spacing to compute effective threshold
+THRESHOLD = 0.010 # if 0 use point spacing to compute effective threshold
 THRESHOLD_SPACING_FACTOR = 2.0
-M_NEIGHBORS = 6
-MAX_MODELS = 10
-MAX_ITERATIONS = 60
+M_NEIGHBORS = 8
+MAX_MODELS = 8
+MAX_ITERATIONS = 40
 INNER_ITERATIONS = 40
-SAMPLE_SIZE = 35
+SAMPLE_SIZE = 30
 MIN_INLIERS = 600
-MIN_COVERAGE = 0.12
+MIN_COVERAGE = 0.3
 MSS_MAX_POOL_FRACTION = 0.18
-RANDOM_SEED = 123
+RANDOM_SEED = 12345777
 MESH_SAMPLE_COUNT = 8000
 
 
@@ -189,8 +191,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("Using normals sampled from input mesh faces")
         normals = input_normals
-
-    print("Running GAIR-RANSAC")
+    if ALGORITHM_NAME == "gair":
+        print("Running GAIR-RANSAC")
+    else:
+        print("Running GC-RANSAC")
     models, inliers_masks, total_best_mss_used, total_local_opts = gair_ransac(
         threshold=effective_threshold,
         point_cloud=points,
@@ -204,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         normals=normals,
         random_seed=args.seed,
         min_coverage=MIN_COVERAGE,
-        energy_strategy=FullGairEnergy(),
+        energy_strategy=FullGairEnergy() if ALGORITHM_NAME == "gair" else GcRansacEnergy(),
     )
     if not models:
         raise RuntimeError("gair_ransac did not return any model")
@@ -232,7 +236,9 @@ def main(argv: list[str] | None = None) -> int:
         inlier_mask=inlier_mask,
         mss_used=total_best_mss_used,
         models=models,
-        treshold=effective_threshold,
+        mesh_opacity=1.0,
+        point_opacity=0.55,
+        focus_on_points=True,
     )
     return 0
 

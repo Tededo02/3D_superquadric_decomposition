@@ -158,8 +158,8 @@ def gair_ransac(
                     current_point_cloud,
                     normals=V_mss,
                     sample_size=sample_size,
-                    initial_k=60,
-                    candidate_multiplier=3,
+                    initial_k=300,
+                    candidate_multiplier=12,
                     rng=rng,
                     sampler_context=mss_sampler_context,
                 ),
@@ -294,7 +294,7 @@ def gair_ransac(
             inlier_pts      = current_point_cloud[best_inliers]
             tree_inliers    = _cKDTree(inlier_pts)
             dists, _        = tree_inliers.query(surface_samples, k=1)
-            coverage        = float((dists < 2*threshold).mean())
+            coverage        = float((dists < 4*threshold).mean())
             if coverage < min_coverage:
                 continue
 
@@ -315,7 +315,7 @@ def gair_ransac(
             threshold,
             factor=3.0,
             error_metric=consensus_metric,
-            normals=V if use_normal_coherence else None,
+            normals=None
         )
         remaining_indices = remaining_indices[~remove_mask]
 

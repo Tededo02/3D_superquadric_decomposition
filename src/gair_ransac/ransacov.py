@@ -1,102 +1,185 @@
-"""
-RansaCov: MAXIMUM COVERAGE ILP for multi-model selection.
-Based on eq. (5) of "RansaCov: Multi-model fitting with coverage constraints" (Magri & Fusiello).
+# RansaCov: maximum-coverage ILP for multi-model selection.
+# Based on equation (5) of "RansaCov: Multi-model fitting with coverage
+# constraints" by Magri and Fusiello.
+# Given a candidate pool and a point cloud, it selects at most k models that
+# cover the maximum number of inlier points (residual < threshold).
 
-Given a pool of candidate models and a point cloud, selects at most k models
-that cover the maximum number of inlier points (residual < threshold).
-"""
+from collections.abc import Callable, Sequence
+from typing import Any
+
 import numpy as np
-from scipy.optimize import milp, LinearConstraint, Bounds
+from scipy.optimize import Bounds, LinearConstraint, milp
+from scipy.sparse import csc_matrix, eye, hstack, vstack
 
 
-def ransacov(candidates, points, k, threshold, residual_fn):
-    """
-    Parameters
-    ----------
-    candidates  : list of model objects (SuperQuadricParams)
-    points      : (N, 3) float array — clean point cloud to cover
-    k           : int — maximum number of models to select
-    threshold   : float — inlier distance threshold (epsilon)
-    residual_fn : callable(model, points) -> (N,) residuals (unsigned)
+ResidualFunction = Callable[[Any, np.ndarray], np.ndarray]
 
-    Returns
-    -------
-    selected_indices : list[int] — indices into `candidates` of selected models
-    n_covered        : int — number of points covered by the solution
-    """
-    n_pts = len(points)
-    m = len(candidates)
 
-    if m == 0:
+def _build_coverage_matrix(
+    candidates: Sequence[Any],
+    points: np.ndarray,
+    threshold: float,
+    residual_fn: ResidualFunction,
+) -> np.ndarray:
+    # Build the binary coverage matrix P[i, j]. P[i, j] is true when point i
+    # is an inlier of candidate model j.
+    coverage = np.zeros((points.shape[0], len(candidates)), dtype=bool)
+    for candidate_index, model in enumerate(candidates):
+        residuals = np.asarray(residual_fn(model, points), dtype=np.float64).reshape(-1)
+        if residuals.shape[0] != points.shape[0]:
+            raise ValueError(
+                "residual_fn must return one residual for every input point"
+            )
+        coverage[:, candidate_index] = np.isfinite(residuals) & (residuals < threshold)
+    return coverage
+
+
+def _remove_dominated_candidates(coverage: np.ndarray) -> list[int]:
+    # Sort by cardinality and remove a candidate only when one retained model
+    # covers all its points. This preserves maximum-coverage solutions.
+    cardinalities = coverage.sum(axis=0)
+    order = np.argsort(-cardinalities, kind="stable")
+    kept_indices: list[int] = []
+
+    for candidate_index in order:
+        candidate_coverage = coverage[:, candidate_index]
+        is_dominated = any(
+            np.all(candidate_coverage <= coverage[:, kept_index])
+            for kept_index in kept_indices
+        )
+        if not is_dominated:
+            kept_indices.append(int(candidate_index))
+
+    return kept_indices
+
+
+def ransacov(
+    candidates: Sequence[Any],
+    points: np.ndarray,
+    k: int,
+    threshold: float,
+    residual_fn: ResidualFunction,
+) -> tuple[list[int], int]:
+    # Parameters:
+    # candidates: model objects such as SuperQuadricParams.
+    # points: (N, 3) point cloud to cover.
+    # k: maximum number of models to select.
+    # threshold: inlier distance threshold.
+    # residual_fn: callable returning one unsigned residual per point.
+    #
+    # Returns:
+    # selected_indices: indices into candidates for the selected models.
+    # n_covered: number of points covered by the selected models.
+    point_array = np.asarray(points, dtype=np.float64)
+    if point_array.ndim != 2 or point_array.shape[1] != 3:
+        raise ValueError("points must have shape (N, 3)")
+    if k <= 0:
+        raise ValueError("k must be positive")
+    if not np.isfinite(threshold) or threshold <= 0.0:
+        raise ValueError("threshold must be finite and positive")
+    if len(candidates) == 0 or point_array.shape[0] == 0:
         return [], 0
 
-    # ── Build binary coverage matrix P[i,j]
-    # P[i,j] = 1 if point i is inlier of model j
-    P = np.zeros((n_pts, m), dtype=np.float64)
-    for j, model in enumerate(candidates):
-        residuals = residual_fn(model, points)
-        P[:, j] = (residuals < threshold).astype(np.float64)
-
-    # Sort by cardinality descending; drop Sj if fully subsumed by union of larger sets.
-    order = np.argsort(-P.sum(axis=0))
-    keep = []
-    covered_so_far = np.zeros(n_pts, dtype=bool)
-    for j in order:
-        col = P[:, j].astype(bool)
-        if not np.all(col <= covered_so_far):
-            keep.append(int(j))
-            covered_so_far |= col
-
-    if not keep:
+    coverage = _build_coverage_matrix(
+        candidates,
+        point_array,
+        threshold,
+        residual_fn,
+    )
+    kept_indices = _remove_dominated_candidates(coverage)
+    if not kept_indices:
         return [], 0
 
-    P_kept = P[:, keep]
-    m_kept = len(keep)
+    kept_coverage = coverage[:, kept_indices]
+    # Points with the same candidate-membership pattern share one auxiliary
+    # variable weighted by their multiplicity. This keeps the ILP exact while
+    # reducing its size on large real point clouds.
+    coverage_patterns, pattern_weights = np.unique(
+        kept_coverage,
+        axis=0,
+        return_counts=True,
+    )
+    covered_patterns = coverage_patterns.any(axis=1)
+    coverage_patterns = coverage_patterns[covered_patterns]
+    pattern_weights = pattern_weights[covered_patterns].astype(np.float64)
+    if coverage_patterns.shape[0] == 0:
+        return [], 0
 
-    # ── MILP formulation (scipy.optimize.milp) ────────────────────────────────
-    # Variables: [z_0 .. z_{m_kept-1},  y_0 .. y_{n_pts-1}]
-    # minimize  -Σ yi            (maximise coverage)
+    model_count = len(kept_indices)
+    pattern_count = coverage_patterns.shape[0]
+    variable_count = model_count + pattern_count
+    effective_k = min(k, model_count)
+
+    # Sparse MILP formulation:
+    # variables: [z_0, ..., z_M-1, y_0, ..., y_U-1]
+    # minimize: model_cost * sum(z_j) - sum(weight_i * y_i)
     # subject to:
-    #   (1)  Σ zj <= k
-    #   (2)  Σ_j P[i,j]*zj - yi >= 0   ∀i   (yi can only be 1 if covered)
-    #   zj ∈ {0,1},  0 <= yi <= 1
-    n_vars = m_kept + n_pts
+    #   (1) sum(z_j) <= k
+    #   (2) sum(P[i, j] * z_j) - y_i >= 0 for every coverage pattern i
+    #   z_j in {0, 1}, 0 <= y_i <= 1
+    # A sub-unit total model cost breaks equal-coverage ties in favor of fewer models.
+    objective = np.empty(variable_count, dtype=np.float64)
+    objective[:model_count] = 0.5 / (model_count + 1.0)
+    objective[model_count:] = -pattern_weights
 
-    c = np.zeros(n_vars)
-    c[m_kept:] = -1.0          # -yi
-
-    integrality = np.zeros(n_vars)
-    integrality[:m_kept] = 1   # zj are integer (binary)
-
-    bounds = Bounds(lb=np.zeros(n_vars), ub=np.ones(n_vars))
-
-    # Constraint (1): sum(zj) <= k
-    row0 = np.zeros(n_vars)
-    row0[:m_kept] = 1.0
-
-    # Constraints (2): P[i,:] z - yi >= 0
-    A_coverage = np.zeros((n_pts, n_vars))
-    A_coverage[:, :m_kept] = P_kept
-    A_coverage[np.arange(n_pts), m_kept + np.arange(n_pts)] = -1.0
-
-    A = np.vstack([row0, A_coverage])
-    lb_con = np.concatenate([[-np.inf], np.zeros(n_pts)])
-    ub_con = np.concatenate([[float(k)], np.full(n_pts, np.inf)])
-
-    result = milp(
-        c=c,
-        constraints=LinearConstraint(A, lb_con, ub_con),
-        integrality=integrality,
-        bounds=bounds,
+    integrality = np.zeros(variable_count, dtype=np.uint8)
+    # Only z variables are binary; y variables remain continuous in [0, 1].
+    integrality[:model_count] = 1
+    variable_bounds = Bounds(
+        lb=np.zeros(variable_count, dtype=np.float64),
+        ub=np.ones(variable_count, dtype=np.float64),
     )
 
-    if not result.success:
+    # Constraint (1): sum(z_j) <= k.
+    model_limit = csc_matrix(
+        (
+            np.ones(model_count, dtype=np.float64),
+            (
+                np.zeros(model_count, dtype=np.int64),
+                np.arange(model_count, dtype=np.int64),
+            ),
+        ),
+        shape=(1, variable_count),
+    )
+    # Constraints (2): P[i, :] z - y_i >= 0.
+    coverage_constraints = hstack(
+        (
+            csc_matrix(coverage_patterns, dtype=np.float64),
+            -eye(pattern_count, format="csc", dtype=np.float64),
+        ),
+        format="csc",
+    )
+    constraint_matrix = vstack(
+        (model_limit, coverage_constraints),
+        format="csc",
+    )
+    constraint_lower_bounds = np.concatenate(
+        ((-np.inf,), np.zeros(pattern_count, dtype=np.float64))
+    )
+    constraint_upper_bounds = np.concatenate(
+        ((float(effective_k),), np.full(pattern_count, np.inf, dtype=np.float64))
+    )
+
+    result = milp(
+        c=objective,
+        integrality=integrality,
+        bounds=variable_bounds,
+        constraints=LinearConstraint(
+            constraint_matrix,
+            constraint_lower_bounds,
+            constraint_upper_bounds,
+        ),
+        options={"disp": False},
+    )
+    if not result.success or result.x is None:
         print(f"  [ransacov] ILP solver failed: {result.message}")
         return [], 0
 
-    z = result.x[:m_kept]
-    selected_local = np.where(z > 0.5)[0].tolist()
-    selected_global = [keep[i] for i in selected_local]
-    n_covered = int(round(result.x[m_kept:].sum()))
+    # Map the retained-column solution back to the original candidate indices.
+    selected_local_indices = np.flatnonzero(result.x[:model_count] > 0.5)
+    selected_indices = [kept_indices[index] for index in selected_local_indices]
+    if not selected_indices:
+        return [], 0
 
-    return selected_global, n_covered
+    covered_points = np.any(coverage[:, selected_indices], axis=1)
+    return selected_indices, int(np.count_nonzero(covered_points))

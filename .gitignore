@@ -229,3 +229,5 @@ im_obj/
 .DS_Store
 data/point_clouds/
 visualize_superquadric.py
+data/
+data/results/

@@ -176,6 +176,9 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
         treshold=0.1,
         binary: bool = False,
         camera_position: list | None = None,
+        mesh_opacity: float = 0.65,
+        point_opacity: float = 1.0,
+        focus_on_points: bool = False,
     ) -> list:
 
     # --- plotter ---
@@ -211,7 +214,7 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
             )
             remaining_mask[current_indices[remove_mask]] = False
 
-    _add_meshes_to_plotter(pl, meshes, colors=colors, opacity=0.65)
+    _add_meshes_to_plotter(pl, meshes, colors=colors, opacity=mesh_opacity)
 
     # --- points (if present) ---
     n_points_total = 0
@@ -240,7 +243,7 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
                 clim=(0.0, color_max),
                 render_points_as_spheres=True,
                 point_size=cloud_point_size,
-                opacity=1.0,
+                opacity=point_opacity,
                 ambient=0.25,
                 specular=0.15,
                 nan_color="black",
@@ -261,21 +264,44 @@ def show_mesh_and_points(meshes: list, pts: list =None, point_size=8, show_bound
             if mask_is_valid:
                 mask = np.asarray(inlier_mask, dtype=bool)
                 if mask.any():
-                    pl.add_points(points[mask], render_points_as_spheres=True, point_size=cloud_point_size, color="#00e676")
+                    pl.add_points(
+                        points[mask],
+                        render_points_as_spheres=True,
+                        point_size=cloud_point_size,
+                        color="#00e676",
+                        opacity=point_opacity,
+                    )
                 if (~mask).any():
-                    pl.add_points(points[~mask], render_points_as_spheres=True, point_size=cloud_point_size, color="#ff1744", opacity=0.8)
+                    pl.add_points(
+                        points[~mask],
+                        render_points_as_spheres=True,
+                        point_size=cloud_point_size,
+                        color="#ff1744",
+                        opacity=min(point_opacity, 0.8),
+                    )
             else:
-                pl.add_points(points, render_points_as_spheres=True, point_size=cloud_point_size, color="#1565c0")
+                pl.add_points(
+                    points,
+                    render_points_as_spheres=True,
+                    point_size=cloud_point_size,
+                    color="#1565c0",
+                    opacity=point_opacity,
+                )
     pl.enable_eye_dome_lighting()
 
-    pl.camera_position = camera_position if camera_position is not None else DEFAULT_CAMERA_POSITION
+    if camera_position is not None:
+        pl.camera_position = camera_position
+    elif focus_on_points and points is not None:
+        _focus_camera_on_points(pl, points)
+    else:
+        pl.camera_position = DEFAULT_CAMERA_POSITION
 
     pl.show()
     last_camera_position = pl.camera_position
 
     mesh_only_plotter = pv.Plotter()
     mesh_only_plotter.set_background("white")
-    _add_meshes_to_plotter(mesh_only_plotter, meshes, colors=colors, opacity=0.65)
+    _add_meshes_to_plotter(mesh_only_plotter, meshes, colors=colors, opacity=mesh_opacity)
     mesh_only_plotter.enable_eye_dome_lighting()
     mesh_only_plotter.camera_position = last_camera_position
     mesh_only_plotter.show()

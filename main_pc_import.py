@@ -16,18 +16,19 @@ from src.gair_ransac.gair_ransac import gair_ransac
 
 
 THRESHOLD_SCALE = 3.0
-THRESHOLD_SPACING_FACTOR = 0.5
+THRESHOLD_SPACING_FACTOR = 0.2
 NOISE_STD=0.0
 THRESHOLD = 0.02#THRESHOLD_SCALE * NOISE_STD
 NOISE_NORMAL_STD=0.0
-SAMPLE_SIZE = 40
+M_NEIGHBORS = 10
+SAMPLE_SIZE = 30
 MIN_INLIERS = 40
 PROJECT_ROOT = Path(__file__).resolve().parent
 """anthropomorphic_mushroom_character.glb"""
-PC_FILE = PROJECT_ROOT / "test_objects" / "cat1_0_0.2.ply"
-# Single knob for how many points are sampled from the input mesh
-# and from the reconstructed superquadrics for evaluation.
-SAMPLED_POINT_COUNT = 30000
+PC_FILE = PROJECT_ROOT / "test_objects" / "main_noise_0.2_outliers_10pct.ply"
+# Number of points sampled from input meshes and reconstructed superquadrics.
+# Existing point clouds are loaded without resampling.
+SAMPLED_POINT_COUNT = 6000
 DEFAULT_BASE_SEED = 12345679
 MAX_MODEL = 4
 ALGORITHM = "gair-ransac" # options: "ls", "inner-ransac", "ransac", "gair-ransac", "gc-ransac"
@@ -54,23 +55,23 @@ def build_run_seeds(base_seed: int = DEFAULT_BASE_SEED) -> RunSeeds:
     )
 
 
-def resolve_input_mesh_path(pc_file: str | Path) -> Path:
-    mesh_path = Path(pc_file).expanduser()
-    if not mesh_path.is_absolute():
-        mesh_path = PROJECT_ROOT / mesh_path
+def resolve_input_path(pc_file: str | Path) -> Path:
+    input_path = Path(pc_file).expanduser()
+    if not input_path.is_absolute():
+        input_path = PROJECT_ROOT / input_path
 
-    if mesh_path.exists():
-        return mesh_path
+    if input_path.exists():
+        return input_path
 
-    available_meshes = sorted(
+    available_geometries = sorted(
         path.relative_to(PROJECT_ROOT)
         for pattern in ("*.glb", "*.stl", "*.obj", "*.ply")
         for path in PROJECT_ROOT.rglob(pattern)
     )
-    available_hint = ", ".join(str(path) for path in available_meshes[:10])
+    available_hint = ", ".join(str(path) for path in available_geometries[:10])
     raise FileNotFoundError(
-        f"Input mesh not found: {mesh_path}\n"
-        f"Available meshes in repo: {available_hint}"
+        f"Input geometry not found: {input_path}\n"
+        f"Available geometries in repo: {available_hint}"
     )
 
 
@@ -97,6 +98,67 @@ def sample_input_mesh(
     sampled_points = np.vstack([np.asarray(sampled_points_list[0], dtype=np.float64),np.asarray(noisy_sampled[0], dtype=np.float64),])
     normals = np.vstack([np.asarray(normals_list[0], dtype=np.float64),np.asarray(noisy_normal[0], dtype=np.float64),])
     return sampled_points, normals
+
+
+def _load_embedded_point_normals(point_cloud: trimesh.PointCloud) -> np.ndarray:
+    ply_raw = point_cloud.metadata.get("_ply_raw", {})
+    vertex_data = ply_raw.get("vertex", {}).get("data")
+    property_names = vertex_data.dtype.names if vertex_data is not None else None
+
+    if property_names and {"nx", "ny", "nz"}.issubset(property_names):
+        normals = np.column_stack(
+            (vertex_data["nx"], vertex_data["ny"], vertex_data["nz"])
+        ).astype(np.float64, copy=False)
+    else:
+        raise ValueError(
+            "The input point cloud must contain the nx, ny and nz vertex properties"
+        )
+
+    normal_lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+    if np.any(normal_lengths <= 1e-12):
+        raise ValueError("The input point cloud contains zero-length normals")
+    return normals / normal_lengths
+
+
+def load_input_geometry(
+    input_path: Path,
+    n_points: int,
+    seed: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    geometry = trimesh.load(str(input_path), process=False)
+    if isinstance(geometry, trimesh.Scene):
+        geometry = trimesh.util.concatenate(list(geometry.geometry.values()))
+
+    if isinstance(geometry, trimesh.PointCloud):
+        points = np.asarray(geometry.vertices, dtype=np.float64)
+        normals = _load_embedded_point_normals(geometry)
+        if points.shape[0] != normals.shape[0]:
+            raise ValueError("Point and normal counts do not match")
+        return points, normals
+
+    if not isinstance(geometry, trimesh.Trimesh):
+        raise TypeError(f"Unsupported input geometry type: {type(geometry).__name__}")
+    return sample_input_mesh(geometry, n_points=n_points, seed=seed)
+
+
+def normalize_point_cloud(points: np.ndarray) -> np.ndarray:
+    point_array = np.asarray(points, dtype=np.float64)
+    if point_array.shape[0] == 0:
+        raise ValueError("Point cloud cannot be empty")
+
+    bb_min, bb_max = point_array.min(axis=0), point_array.max(axis=0)
+    bb_size = bb_max - bb_min
+    scale = float(np.max(bb_size))
+    if scale <= 0.0:
+        scale = 1.0
+
+    normalized_points = (point_array - bb_min) / scale
+    print(
+        "  bounding box after normalization: "
+        f"min={normalized_points.min(axis=0)}  "
+        f"max={normalized_points.max(axis=0)}"
+    )
+    return normalized_points
 
 
 def estimate_point_spacing(points: np.ndarray) -> float:
@@ -126,22 +188,16 @@ def create_and_estimate_supq(
 ):
     # --- load point cloud from file ---
     run_seeds = build_run_seeds(base_seed)
-    mesh_path = resolve_input_mesh_path(pc_file)
-    scene = trimesh.load(str(mesh_path))
-    if isinstance(scene, trimesh.Scene):
-        mesh_raw = trimesh.util.concatenate(list(scene.geometry.values()))
-    else:
-        mesh_raw = scene
-
-    # Always sample the input mesh through the shared sampling utilities module.
-    sampled_points, normals = sample_input_mesh(
-        mesh_raw,
+    input_path = resolve_input_path(pc_file)
+    sampled_points, normals = load_input_geometry(
+        input_path,
         n_points=SAMPLED_POINT_COUNT,
         seed=run_seeds.input_sampling,
     )
+    sampled_points = normalize_point_cloud(sampled_points)
     effective_threshold, point_spacing = compute_effective_threshold(sampled_points)
 
-    print(f"Loaded {sampled_points.shape[0]} points from {mesh_path.name}")
+    print(f"Loaded {sampled_points.shape[0]} points from {input_path.name}")
     print(
         "Seeds | "
         f"base={run_seeds.base} "
@@ -149,7 +205,11 @@ def create_and_estimate_supq(
         f"algorithm={run_seeds.algorithm} "
         f"evaluation_sampling={run_seeds.evaluation_sampling}"
     )
-    print(f"Sampling | sampled_point_count={SAMPLED_POINT_COUNT}")
+    print(
+        "Sampling | "
+        f"input_point_count={sampled_points.shape[0]} "
+        f"evaluation_points_per_model={SAMPLED_POINT_COUNT}"
+    )
     print(
         "Consensus | "
         f"min_threshold={THRESHOLD:.4f} "
@@ -208,6 +268,7 @@ def create_and_estimate_supq(
             inner_iterations=200,
             use_normal_coherence=(algorithm == "gair-ransac"),
             min_coverage=0.0,
+            m_neighbors=M_NEIGHBORS,
             random_seed=run_seeds.algorithm,
             sample_size=SAMPLE_SIZE,
             min_inliers=MIN_INLIERS,
@@ -265,7 +326,7 @@ def create_and_estimate_supq(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("input_mesh", nargs="?", default=PC_FILE)
+    parser.add_argument("input_geometry", nargs="?", default=PC_FILE)
     parser.add_argument("--seed", type=int, default=DEFAULT_BASE_SEED)
     return parser.parse_args(argv)
 
@@ -275,7 +336,7 @@ def main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:]
 
     args = parse_args(argv)
-    create_and_estimate_supq(args.input_mesh, base_seed=args.seed)
+    create_and_estimate_supq(args.input_geometry, base_seed=args.seed)
     return 0
 
 

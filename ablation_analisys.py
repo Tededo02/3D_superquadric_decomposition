@@ -5,6 +5,7 @@
 # c_ij = (1 + <n_i, n_j>) / 2, rho_i = clip(d_i / (outlier_scale eps), 0, 1).
 # w_ij = c_ij - p_ij / 2.
 # ConstantCoherenceGairEnergy uses the same formula and unary term, but fixes c_ij = 1.
+# GairThresholdEnergy filters with c_ij, then fixes c_ij = 1 on retained edges.
 # OnlyUnaryGairStrategy uses the model-normal unary term and the GC-RANSAC pairwise term.
 
 import argparse
@@ -20,6 +21,7 @@ from src.gair_ransac.energy_strategies import (
     ComposedGairEnergy,
     ConstantCoherenceGairEnergy,
     FullGairEnergy,
+    GairThresholdEnergy,
     GairEnergyStrategy,
     GcRansacEnergy,
     OldPaperGairEnergy,
@@ -39,11 +41,11 @@ RESULTS_CSV_PATH = (
 )
 
 ENERGY_STRATEGIES: tuple[GairEnergyStrategy, ...] = (
-    FullGairEnergy(),
+    GairThresholdEnergy(),
     ConstantCoherenceGairEnergy(),
     OnlyUnaryGairStrategy(),
+    FullGairEnergy(),
     GcRansacEnergy(),
-    OldPaperGairEnergy(),
 )
 ITERATIONS_PER_ENERGY = 8
 RUN_STRATEGIES_CONCURRENTLY = True
@@ -55,10 +57,10 @@ EVALUATION_POINT_COUNT = 16000
 OUTLIER_RATIO = 0.10
 OUTLIER_MARGIN = 0.10
 OUTLIER_MODE = "uniform"
-DEFAULT_BASE_SEED = 12345679
-EVALUATION_SEED = 42
+DEFAULT_BASE_SEED = 2345679
+EVALUATION_SEED = 421
 NOISE_STD = 0.0
-NOISE_NORMAL_STD = 0.0
+NOISE_NORMAL_STD =0.0 #0.14  per 10    #0.07 per 5 gradi
 THRESHOLD = 0.018
 SAMPLE_SIZE = 30
 MIN_INLIERS = 40

@@ -5,7 +5,7 @@ import trimesh
 
 
 TARGET_POINT_COUNT = 100_000
-POINT_CLOUD_PATH = Path("test_objects/real_pc/car_pc.ply")
+POINT_CLOUD_PATH = Path("test_objects/real_pc/et2_no_floor.ply")
 
 
 def load_point_cloud(path: Path) -> tuple[np.ndarray, np.ndarray | None]:

@@ -8,6 +8,9 @@ from .normal_coherence_pairwise_energy import (
 )
 from .pairwise_costs import PairwiseCosts
 from .pairwise_energy_term import PairwiseEnergyTerm
+from .thresholded_constant_coherence_pairwise_energy import (
+    ThresholdedConstantCoherencePairwiseEnergy,
+)
 
 
 __all__ = [
@@ -15,4 +18,5 @@ __all__ = [
     "NormalCoherencePairwiseEnergy",
     "PairwiseCosts",
     "PairwiseEnergyTerm",
+    "ThresholdedConstantCoherencePairwiseEnergy",
 ]
