@@ -1,7 +1,0 @@
-algo,method,outlier_frac,budget_s,k,n_covered,n_evals,chamfer,cd_coverage,cd_accuracy,hausdorff,n_candidates
-gair-ransac,exhaustive,0.1,60.0,1,212,7,0.35337,0.328798,0.024573,0.834511,7
-gair-ransac,ransacov,0.1,60.0,1,215,7,0.36103,0.335301,0.025729,0.854229,7
-lo-ransac,exhaustive,0.1,60.0,1,282,36,0.128244,0.062626,0.065618,0.2929,36
-lo-ransac,ransacov,0.1,60.0,1,339,36,0.132466,0.095619,0.036847,0.368967,36
-vanilla,exhaustive,0.1,60.0,1,271,45,0.126781,0.058863,0.067918,0.274572,45
-vanilla,ransacov,0.1,60.0,1,278,45,0.156451,0.063061,0.09339,0.429928,45
