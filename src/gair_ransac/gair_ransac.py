@@ -4,7 +4,7 @@ import numpy as np
 
 from src.superquadrics.superquadric_param import SuperQuadricParams
 from .consensus import compute_consensus, expanded_removal_mask
-from .energy_strategies import FullGairEnergy, GairEnergyStrategy
+from .energy import EnergyFn, full_gair_energy
 from .inner_ransac import inner_ransac, fit_superquadric_ls, InnerRansacResult
 from .gair import gair
 from .initgraph import build_knn_graph
@@ -98,7 +98,7 @@ def gair_ransac(
     random_seed: int | None = None,
     min_coverage: float = 0.0,
     use_normal_coherence: bool | None = None,
-    energy_strategy: GairEnergyStrategy | None = None,
+    energy_strategy: EnergyFn | None = None,
     deadline: float | None = None,
 ) -> tuple[list[SuperQuadricParams], list[BoolArray], FloatArray | None, int]:
     """deadline: an absolute time.perf_counter() value. When set, the per-model iteration
@@ -108,7 +108,7 @@ def gair_ransac(
     total_best_mss_used: FloatArray | None = None
     total_local_opts: int = 0
     if energy_strategy is None:
-        energy_strategy = FullGairEnergy()
+        energy_strategy = full_gair_energy
 
     point_cloud: FloatArray = np.asarray(point_cloud, dtype=np.float64)
     if use_normal_coherence is None:

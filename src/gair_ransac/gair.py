@@ -1,9 +1,8 @@
 import maxflow
 import numpy as np
 
-from src.superquadrics.superquadric_param import SuperQuadricParams
-from .energy_strategies.context import EnergyContext
-from .energy_strategies.gair_energy_strategy import GairEnergyStrategy
+from ..superquadrics.superquadric_param import SuperQuadricParams
+from .energy import EnergyContext, EnergyFn
 
 
 def gair(
@@ -12,7 +11,7 @@ def gair(
     normals: np.ndarray | None,
     model: SuperQuadricParams,
     eps: float,
-    energy_strategy: GairEnergyStrategy,
+    energy_strategy: EnergyFn,
     error_metric: str = "radial",
 ) -> np.ndarray:
     context = EnergyContext.create(
@@ -23,7 +22,7 @@ def gair(
         eps=eps,
         error_metric=error_metric,
     )
-    energy = energy_strategy.build(context)
+    energy = energy_strategy(context)
 
     graph = maxflow.Graph[float](
         context.points.shape[0],

@@ -1,8 +1,4 @@
 # RansaCov: maximum-coverage ILP for multi-model selection.
-# Based on equation (5) of "RansaCov: Multi-model fitting with coverage
-# constraints" by Magri and Fusiello.
-# Given a candidate pool and a point cloud, it selects at most k models that
-# cover the maximum number of inlier points (residual < threshold).
 
 from collections.abc import Callable, Sequence
 from typing import Any

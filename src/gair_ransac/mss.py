@@ -146,13 +146,6 @@ def _coherent_local_pool_indices(points: np.ndarray,tree: cKDTree,seed_idx: int,
     return idx[:target_pool_size]
 
 # This function scores a local sample based on compactness and normal coherence.
-# Lower is better. The compactness term encourages the sample to be spatially tight,
-# while the coherence penalty encourages normals to be aligned with the seed normal.
-# this is the formula to score: score = (mean distance to seed) / base_scale + 0.75 * (1 - mean normal alignment)
-# The base_scale is typically the median nearest neighbor distance in the whole point cloud, which normalizes the compactness term to be scale-invariant.
-# The normal alignment is the cosine of the angle between the sample normals and the seed normal, averaged over the sample. A value of 1 means perfect alignment,
-# while 0 means orthogonal and -1 means opposite direction. The coherence penalty is then 1 minus this average alignment, 
-# so it ranges from 0 (perfectly coherent) to 2 (completely incoherent).
 def _local_sample_score(
     points: np.ndarray,
     normals: np.ndarray | None,

@@ -1,0 +1,143 @@
+notebook  : explore_pointcloud.ipynb
+out_dir   : C:\Users\Alessandro\Desktop\Research\GEOPRIDE\superquadric-decomposition-public\data\nb_baseline\golden
+clouds    : ['supersingle0_0_0', 'cat1_0_0', 'bird']
+trials    : 2   seed: 12345   outlier_frac: 0.01
+
+======================================================================
+supersingle0_0_0
+======================================================================
+repo root : C:\Users\Alessandro\Desktop\Research\GEOPRIDE\superquadric-decomposition-public
+run.py    : C:\Users\Alessandro\Desktop\Research\GEOPRIDE\superquadric-decomposition-public\run.py
+MASTER_SEED in run.py: 12345
+pyvista    : 0.49.0 | jupyter_backend: trame
+cloud      : bird.stl
+algorithms : ['vanilla', 'lo-ransac', 'gc-ransac', 'gair-ransac']
+trials     : 3   outlier_frac: 0.01   seed: 12345
+max k      : 1   max_models: 10
+  bounding box after normalization: min=[0. 0. 0.]  max=[0.91661536 0.81303245 1.        ]
+
+500 points loaded
+config     : {'threshold': 0.03, 'mss_sample_size': 30, 'mss_pts_per_patch': 3, 'mss_voxel_spacing_factor': 40}
+threshold  : 0.03
+500 clean + 5 outliers = 505 points
+trial seeds: [1501552846, 488200390]
+    correctly_classified=503/505  (99.6%)
+  trial 0 vanilla      CD=0.0364  COV=0.0122  ACC=0.0241  HD=0.0539  CLF=0.996  models=1  0.9s
+    correctly_classified=503/505  (99.6%)
+  trial 0 lo-ransac    CD=0.0365  COV=0.0126  ACC=0.0240  HD=0.0512  CLF=0.996  models=1  2.2s
+    correctly_classified=505/505  (100.0%)
+  trial 0 gc-ransac    CD=0.0367  COV=0.0124  ACC=0.0243  HD=0.0515  CLF=1.000  models=1  9.3s
+    correctly_classified=504/505  (99.8%)
+  trial 0 gair-ransac  CD=0.0372  COV=0.0127  ACC=0.0245  HD=0.0520  CLF=0.998  models=1  5.1s
+    correctly_classified=505/505  (100.0%)
+  trial 1 vanilla      CD=0.0365  COV=0.0123  ACC=0.0242  HD=0.0554  CLF=1.000  models=1  0.3s
+    correctly_classified=504/505  (99.8%)
+  trial 1 lo-ransac    CD=0.0368  COV=0.0127  ACC=0.0241  HD=0.0556  CLF=0.998  models=1  3.4s
+    correctly_classified=505/505  (100.0%)
+  trial 1 gc-ransac    CD=0.0371  COV=0.0127  ACC=0.0245  HD=0.0563  CLF=1.000  models=1  7.7s
+    correctly_classified=505/505  (100.0%)
+  trial 1 gair-ransac  CD=0.0388  COV=0.0136  ACC=0.0252  HD=0.0544  CLF=1.000  models=1  4.9s
+
+8 runs completed
+gair-ransac trial 0: 1 superquadric(s) - close the window to continue
+  vanilla      k=1  covered=500/500  CD=0.0365  CLF=1.000
+  lo-ransac    k=1  covered=499/500  CD=0.0368  CLF=0.998
+  gc-ransac    k=1  covered=500/500  CD=0.0367  CLF=1.000
+  gair-ransac  k=1  covered=500/500  CD=0.0388  CLF=1.000
+gair-ransac set-cover: 1 superquadric(s) - close the window to continue
+RUN_BATCH is False - nothing written
+  -> C:\Users\Alessandro\Desktop\Research\GEOPRIDE\superquadric-decomposition-public\data\nb_baseline\golden\supersingle0_0_0  (8 runs, 8 candidates, 4 selected)  35.3s
+
+======================================================================
+cat1_0_0
+======================================================================
+repo root : C:\Users\Alessandro\Desktop\Research\GEOPRIDE\superquadric-decomposition-public
+run.py    : C:\Users\Alessandro\Desktop\Research\GEOPRIDE\superquadric-decomposition-public\run.py
+MASTER_SEED in run.py: 12345
+pyvista    : 0.49.0 | jupyter_backend: trame
+cloud      : bird.stl
+algorithms : ['vanilla', 'lo-ransac', 'gc-ransac', 'gair-ransac']
+trials     : 3   outlier_frac: 0.01   seed: 12345
+max k      : 1   max_models: 10
+  bounding box after normalization: min=[0. 0. 0.]  max=[0.91465962 1.         0.58688812]
+
+650 points loaded
+config     : {'threshold': 0.03, 'mss_sample_size': 20, 'mss_pts_per_patch': 5, 'mss_voxel_spacing_factor': 2}
+threshold  : 0.03
+650 clean + 6 outliers = 656 points
+trial seeds: [1501552846, 488200390]
+    correctly_classified=521/656  (79.4%)
+  trial 0 vanilla      CD=0.1097  COV=0.0187  ACC=0.0910  HD=0.5629  CLF=0.794  models=3  11.6s
+    correctly_classified=562/656  (85.7%)
+  trial 0 lo-ransac    CD=0.0796  COV=0.0149  ACC=0.0647  HD=0.4896  CLF=0.857  models=3  14.8s
+    correctly_classified=532/656  (81.1%)
+  trial 0 gc-ransac    CD=0.0453  COV=0.0214  ACC=0.0239  HD=0.1333  CLF=0.811  models=2  31.2s
+    correctly_classified=577/656  (88.0%)
+  trial 0 gair-ransac  CD=0.0403  COV=0.0116  ACC=0.0287  HD=0.1175  CLF=0.880  models=3  18.0s
+    correctly_classified=553/656  (84.3%)
+  trial 1 vanilla      CD=0.1054  COV=0.0159  ACC=0.0895  HD=0.6074  CLF=0.843  models=4  8.1s
+    correctly_classified=560/656  (85.4%)
+  trial 1 lo-ransac    CD=0.0601  COV=0.0153  ACC=0.0448  HD=0.2028  CLF=0.854  models=3  11.3s
+    correctly_classified=534/656  (81.4%)
+  trial 1 gc-ransac    CD=0.0454  COV=0.0214  ACC=0.0240  HD=0.1333  CLF=0.814  models=2  15.2s
+    correctly_classified=575/656  (87.7%)
+  trial 1 gair-ransac  CD=0.0376  COV=0.0118  ACC=0.0257  HD=0.0996  CLF=0.877  models=3  28.6s
+
+8 runs completed
+gair-ransac trial 0: 3 superquadric(s) - close the window to continue
+  vanilla      k=1  covered=315/650  CD=0.1354  CLF=0.488
+  lo-ransac    k=1  covered=340/650  CD=0.1248  CLF=0.527
+  gc-ransac    k=1  covered=345/650  CD=0.1250  CLF=0.535
+  gair-ransac  k=1  covered=340/650  CD=0.1245  CLF=0.527
+gair-ransac set-cover: 1 superquadric(s) - close the window to continue
+RUN_BATCH is False - nothing written
+  -> C:\Users\Alessandro\Desktop\Research\GEOPRIDE\superquadric-decomposition-public\data\nb_baseline\golden\cat1_0_0  (8 runs, 23 candidates, 4 selected)  139.1s
+
+======================================================================
+bird
+======================================================================
+repo root : C:\Users\Alessandro\Desktop\Research\GEOPRIDE\superquadric-decomposition-public
+run.py    : C:\Users\Alessandro\Desktop\Research\GEOPRIDE\superquadric-decomposition-public\run.py
+MASTER_SEED in run.py: 12345
+pyvista    : 0.49.0 | jupyter_backend: trame
+cloud      : bird.stl
+algorithms : ['vanilla', 'lo-ransac', 'gc-ransac', 'gair-ransac']
+trials     : 3   outlier_frac: 0.01   seed: 12345
+max k      : 1   max_models: 10
+  bounding box after normalization: min=[0. 0. 0.]  max=[0.50248776 1.         0.98300561]
+
+1439 points loaded
+config     : {'threshold': 0.03, 'mss_sample_size': 50, 'mss_pts_per_patch': 5, 'mss_voxel_spacing_factor': 150}
+threshold  : 0.03
+1439 clean + 14 outliers = 1453 points
+trial seeds: [1501552846, 488200390]
+    correctly_classified=1211/1453  (83.3%)
+  trial 0 vanilla      CD=0.1478  COV=0.0151  ACC=0.1326  HD=0.7389  CLF=0.833  models=5  15.8s
+    correctly_classified=1267/1453  (87.2%)
+  trial 0 lo-ransac    CD=0.0985  COV=0.0133  ACC=0.0852  HD=0.6609  CLF=0.872  models=4  31.2s
+    correctly_classified=757/1453  (52.1%)
+  trial 0 gc-ransac    CD=0.0955  COV=0.0594  ACC=0.0361  HD=0.3414  CLF=0.521  models=1  157.2s
+    correctly_classified=1001/1453  (68.9%)
+  trial 0 gair-ransac  CD=0.0458  COV=0.0182  ACC=0.0276  HD=0.1996  CLF=0.689  models=5  46.1s
+    correctly_classified=1232/1453  (84.8%)
+  trial 1 vanilla      CD=0.1325  COV=0.0141  ACC=0.1184  HD=0.7288  CLF=0.848  models=5  10.5s
+    correctly_classified=1276/1453  (87.8%)
+  trial 1 lo-ransac    CD=0.1259  COV=0.0143  ACC=0.1117  HD=0.6598  CLF=0.878  models=4  21.1s
+    correctly_classified=728/1453  (50.1%)
+  trial 1 gc-ransac    CD=0.0982  COV=0.0736  ACC=0.0247  HD=0.3164  CLF=0.501  models=1  64.7s
+    correctly_classified=1099/1453  (75.6%)
+  trial 1 gair-ransac  CD=0.0445  COV=0.0170  ACC=0.0275  HD=0.1647  CLF=0.756  models=5  47.4s
+
+8 runs completed
+gair-ransac trial 0: 5 superquadric(s) - close the window to continue
+  vanilla      k=1  covered=651/1439  CD=0.0964  CLF=0.455
+  lo-ransac    k=1  covered=695/1439  CD=0.0976  CLF=0.486
+  gc-ransac    k=1  covered=745/1439  CD=0.0955  CLF=0.521
+  gair-ransac  k=1  covered=756/1439  CD=0.0888  CLF=0.528
+gair-ransac set-cover: 1 superquadric(s) - close the window to continue
+RUN_BATCH is False - nothing written
+  -> C:\Users\Alessandro\Desktop\Research\GEOPRIDE\superquadric-decomposition-public\data\nb_baseline\golden\bird  (8 runs, 30 candidates, 4 selected)  394.6s
+
+done in 569.1s
+compare a later snapshot with:
+  python baseline_compare.py data/nb_baseline/golden <new_dir>
